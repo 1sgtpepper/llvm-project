@@ -1,0 +1,98 @@
+name: MLIR function prof metadata CI
+
+on:
+  push:
+    branches:
+      - ci/mlir-function-prof-metadata
+  workflow_dispatch:
+
+jobs:
+  targeted:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout patch branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+
+      - name: Configure narrow MLIR build
+        run: |
+          cmake -S llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_TARGETS_TO_BUILD=host \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_CCACHE_BUILD=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF
+
+      - name: Build repro tools
+        run: ninja -C build llvm-as mlir-translate
+
+      - name: Check function-level prof metadata import and export
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "patch HEAD: $(git rev-parse HEAD)"
+          build/bin/llvm-as --version | head -n 2
+          build/bin/mlir-translate --version | head -n 2
+
+          cat > synthetic.ll <<'EOF'
+          define void @synthetic() !prof !0 {
+            ret void
+          }
+
+          !0 = !{!"synthetic_function_entry_count", i64 7}
+          EOF
+
+          cat > with_import_guid.ll <<'EOF'
+          define void @with_import_guid() !prof !0 {
+            ret void
+          }
+
+          !0 = !{!"function_entry_count", i64 7, i64 1234}
+          EOF
+
+          build/bin/llvm-as -disable-output synthetic.ll
+          build/bin/llvm-as -disable-output with_import_guid.ll
+
+          build/bin/mlir-translate -import-llvm synthetic.ll > synthetic.mlir 2> synthetic.err
+          build/bin/mlir-translate -import-llvm with_import_guid.ll > with_import_guid.mlir 2> with_import_guid.err
+          test ! -s synthetic.err
+          test ! -s with_import_guid.err
+
+          grep -F 'function_entry_count = 7 : i64' synthetic.mlir
+          grep -F 'function_entry_count_synthetic' synthetic.mlir
+          grep -F 'function_entry_count = 7 : i64' with_import_guid.mlir
+          grep -F 'function_entry_count_imports = array<i64: 1234>' with_import_guid.mlir
+
+          build/bin/mlir-translate -import-llvm synthetic.ll \
+            | build/bin/mlir-translate -mlir-to-llvmir > synthetic.roundtrip.ll
+          build/bin/mlir-translate -import-llvm with_import_guid.ll \
+            | build/bin/mlir-translate -mlir-to-llvmir > with_import_guid.roundtrip.ll
+
+          grep -F '!"synthetic_function_entry_count", i64 7' synthetic.roundtrip.ll
+          grep -F '!"function_entry_count", i64 7, i64 1234' with_import_guid.roundtrip.ll
+
+          cat > synthetic_export.mlir <<'EOF'
+          llvm.func @syntheticFunctionEntryCount() attributes {function_entry_count = 7 : i64, function_entry_count_synthetic} {
+            llvm.return
+          }
+          EOF
+
+          cat > imports_export.mlir <<'EOF'
+          llvm.func @functionEntryCountWithImports() attributes {function_entry_count = 7 : i64, function_entry_count_imports = array<i64: 1234>} {
+            llvm.return
+          }
+          EOF
+
+          build/bin/mlir-translate -mlir-to-llvmir synthetic_export.mlir > synthetic_export.ll
+          build/bin/mlir-translate -mlir-to-llvmir imports_export.mlir > imports_export.ll
+          grep -F '!"synthetic_function_entry_count", i64 7' synthetic_export.ll
+          grep -F '!"function_entry_count", i64 7, i64 1234' imports_export.ll
