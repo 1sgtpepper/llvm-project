@@ -1902,6 +1902,26 @@ llvm.func @functionEntryCount() attributes {function_entry_count = 4242 : i64} {
 
 // -----
 
+// CHECK-LABEL: @syntheticFunctionEntryCount
+// CHECK-SAME: !prof ![[SYNTH_PROF_ID:[0-9]*]]
+llvm.func @syntheticFunctionEntryCount() attributes {function_entry_count = 7 : i64, function_entry_count_synthetic} {
+  llvm.return
+}
+
+// CHECK: ![[SYNTH_PROF_ID]] = !{!"synthetic_function_entry_count", i64 7}
+
+// -----
+
+// CHECK-LABEL: @functionEntryCountWithImports
+// CHECK-SAME: !prof ![[IMPORTS_PROF_ID:[0-9]*]]
+llvm.func @functionEntryCountWithImports() attributes {function_entry_count = 7 : i64, function_entry_count_imports = array<i64: 1234>} {
+  llvm.return
+}
+
+// CHECK: ![[IMPORTS_PROF_ID]] = !{!"function_entry_count", i64 7, i64 1234}
+
+// -----
+
 // CHECK-LABEL: @constant_bf16
 llvm.func @constant_bf16() -> bf16 {
   %0 = llvm.mlir.constant(1.000000e+01 : bf16) : bf16

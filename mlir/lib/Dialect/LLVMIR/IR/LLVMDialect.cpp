@@ -3266,6 +3266,15 @@ LogicalResult LLVMFuncOp::verify() {
   if (failed(verifyComdat(*this, getComdat())))
     return failure();
 
+  if (!getFunctionEntryCount()) {
+    if (getFunctionEntryCountSynthetic())
+      return emitOpError() << "requires function_entry_count when "
+                              "function_entry_count_synthetic is set";
+    if (getFunctionEntryCountImportsAttr())
+      return emitOpError() << "requires function_entry_count when "
+                              "function_entry_count_imports is set";
+  }
+
   if (isExternal()) {
     if (getLinkage() != LLVM::Linkage::External &&
         getLinkage() != LLVM::Linkage::ExternWeak)

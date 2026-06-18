@@ -2035,6 +2035,8 @@ def LLVM_LLVMFuncOp : LLVM_Op<"func", [
     OptionalAttr<DictArrayAttr>:$arg_attrs,
     OptionalAttr<DictArrayAttr>:$res_attrs,
     OptionalAttr<I64Attr>:$function_entry_count,
+    UnitAttr:$function_entry_count_synthetic,
+    OptionalAttr<DenseI64ArrayAttr>:$function_entry_count_imports,
     OptionalAttr<LLVM_MemoryEffectsAttr>:$memory_effects,
     DefaultValuedAttr<Visibility, "mlir::LLVM::Visibility::Default">:$visibility_,
     UnitAttr:$arm_streaming, UnitAttr:$arm_locally_streaming,
