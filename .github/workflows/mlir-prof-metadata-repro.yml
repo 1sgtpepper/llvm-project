@@ -1,0 +1,94 @@
+name: MLIR prof metadata repro
+
+on:
+  push:
+    branches:
+      - ci/mlir-prof-metadata-repro
+  workflow_dispatch:
+
+jobs:
+  repro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout llvm-project main
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-project
+          ref: main
+          path: llvm-project
+          fetch-depth: 1
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build ccache
+
+      - name: Configure narrow MLIR build
+        run: |
+          cmake -S llvm-project/llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_TARGETS_TO_BUILD=host \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_CCACHE_BUILD=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF
+
+      - name: Build repro tools
+        run: ninja -C build llvm-as mlir-translate
+
+      - name: Reproduce function-level prof metadata loss
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "llvm-project HEAD: $(git -C llvm-project rev-parse HEAD)"
+          build/bin/llvm-as --version | head -n 2
+          build/bin/mlir-translate --version | head -n 2
+
+          cat > synthetic.ll <<'EOF'
+          define void @synthetic() !prof !0 {
+            ret void
+          }
+
+          !0 = !{!"synthetic_function_entry_count", i64 7}
+          EOF
+
+          cat > with_import_guid.ll <<'EOF'
+          define void @with_import_guid() !prof !0 {
+            ret void
+          }
+
+          !0 = !{!"function_entry_count", i64 7, i64 1234}
+          EOF
+
+          for input in synthetic.ll with_import_guid.ll; do
+            echo "::group::$input"
+            build/bin/llvm-as -disable-output "$input"
+
+            echo "Import stderr:"
+            build/bin/mlir-translate -import-llvm "$input" > "$input.mlir" 2> "$input.import.err"
+            cat "$input.import.err"
+
+            echo "Imported MLIR:"
+            cat "$input.mlir"
+
+            echo "Round-tripped LLVM IR:"
+            build/bin/mlir-translate -import-llvm "$input" 2> "$input.roundtrip-import.err" \
+              | build/bin/mlir-translate -mlir-to-llvmir > "$input.roundtrip.ll"
+            cat "$input.roundtrip-import.err"
+            cat "$input.roundtrip.ll"
+
+            if grep -q '!prof' "$input.roundtrip.ll"; then
+              echo "Unexpected: !prof survived round-trip for $input" >&2
+              exit 1
+            fi
+
+            if ! grep -q 'unhandled function metadata' "$input.import.err"; then
+              echo "Unexpected: importer did not warn about unhandled function metadata for $input" >&2
+              exit 1
+            fi
+            echo "::endgroup::"
+          done
+
+          echo "Reproduced: llvm-as accepts both inputs, but MLIR import warns and LLVM IR round-trip drops function-level !prof metadata."
