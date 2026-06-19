@@ -124,12 +124,10 @@ static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
     if (!entryCount)
       return failure();
     if (auto funcOp = dyn_cast<LLVMFuncOp>(op)) {
-      funcOp.setFunctionEntryCount(entryCount->getZExtValue());
-      if (name->getString() == llvm::MDProfLabels::SyntheticFunctionEntryCount)
-        funcOp.setFunctionEntryCountSynthetic(true);
-
+      bool isSynthetic =
+          name->getString() == llvm::MDProfLabels::SyntheticFunctionEntryCount;
+      SmallVector<int64_t> importGUIDs;
       if (node->getNumOperands() > 2) {
-        SmallVector<int64_t> importGUIDs;
         importGUIDs.reserve(node->getNumOperands() - 2);
         for (unsigned idx = 2, e = node->getNumOperands(); idx < e; ++idx) {
           llvm::ConstantInt *guid =
@@ -140,9 +138,14 @@ static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
           importGUIDs.push_back(
               static_cast<int64_t>(guid->getValue().getZExtValue()));
         }
+      }
+
+      funcOp.setFunctionEntryCount(entryCount->getZExtValue());
+      if (isSynthetic)
+        funcOp.setFunctionEntryCountSynthetic(true);
+      if (!importGUIDs.empty())
         funcOp.setFunctionEntryCountImportsAttr(
             DenseI64ArrayAttr::get(builder.getContext(), importGUIDs));
-      }
       return success();
     }
     return op->emitWarning()
