@@ -204,7 +204,7 @@ define void @entry_count_imports() !prof !3 {
 
 ; CHECK-LABEL: @synthetic_entry_count_imports
 ; CHECK-NOT: function_entry_count
-; expected-warning @below {{unhandled function metadata}}
+; expected-warning @unknown {{unhandled function metadata}}
 define void @synthetic_entry_count_imports() !prof !4 {
   ret void
 }
@@ -215,7 +215,7 @@ define void @synthetic_entry_count_imports() !prof !4 {
 
 ; CHECK-LABEL: @entry_count_malformed_import
 ; CHECK-NOT: function_entry_count
-; expected-warning @below {{unhandled function metadata}}
+; expected-warning @unknown {{unhandled function metadata}}
 define void @entry_count_malformed_import() !prof !5 {
   ret void
 }
@@ -226,7 +226,7 @@ define void @entry_count_malformed_import() !prof !5 {
 
 ; CHECK-LABEL: @entry_count_too_wide_count
 ; CHECK-NOT: function_entry_count
-; expected-warning @below {{unhandled function metadata}}
+; expected-warning @unknown {{unhandled function metadata}}
 define void @entry_count_too_wide_count() !prof !6 {
   ret void
 }
@@ -237,7 +237,7 @@ define void @entry_count_too_wide_count() !prof !6 {
 
 ; CHECK-LABEL: @entry_count_too_wide_import
 ; CHECK-NOT: function_entry_count
-; expected-warning @below {{unhandled function metadata}}
+; expected-warning @unknown {{unhandled function metadata}}
 define void @entry_count_too_wide_import() !prof !7 {
   ret void
 }

@@ -3279,23 +3279,6 @@ LogicalResult LLVMFuncOp::verify() {
     if (getFunctionEntryCountSynthetic())
       return emitOpError() << "does not support function_entry_count_imports "
                               "with function_entry_count_synthetic";
-    ArrayRef<int64_t> importGUIDs = imports.asArrayRef();
-    if (importGUIDs.empty())
-      return emitOpError() << "requires function_entry_count_imports to be "
-                              "non-empty when set";
-    for (auto [previous, current] :
-         llvm::zip_equal(importGUIDs.drop_back(), importGUIDs.drop_front())) {
-      if (static_cast<uint64_t>(previous) >= static_cast<uint64_t>(current))
-        return emitOpError()
-               << "requires function_entry_count_imports to be sorted and "
-                  "unique by unsigned GUID value";
-    }
-  }
-
-  if (DenseI64ArrayAttr imports = getFunctionEntryCountImportsAttr()) {
-    if (getFunctionEntryCountSynthetic())
-      return emitOpError() << "does not support function_entry_count_imports "
-                              "with function_entry_count_synthetic";
 
     ArrayRef<int64_t> values = imports.asArrayRef();
     if (values.empty())
