@@ -225,14 +225,25 @@ define void @entry_count_malformed_import() !prof !5 {
 
 ; // -----
 
-; CHECK-LABEL: @entry_count_wide_import
+; CHECK-LABEL: @entry_count_wide_count
 ; CHECK-NOT: function_entry_count
 ; expected-warning @below {{unhandled function metadata}}
-define void @entry_count_wide_import() !prof !6 {
+define void @entry_count_wide_count() !prof !6 {
   ret void
 }
 
-!6 = !{!"function_entry_count", i64 7, i128 18446744073709551616}
+!6 = !{!"function_entry_count", i128 18446744073709551616}
+
+; // -----
+
+; CHECK-LABEL: @entry_count_wide_import
+; CHECK-NOT: function_entry_count
+; expected-warning @below {{unhandled function metadata}}
+define void @entry_count_wide_import() !prof !7 {
+  ret void
+}
+
+!7 = !{!"function_entry_count", i64 7, i128 18446744073709551616}
 
 ; // -----
 

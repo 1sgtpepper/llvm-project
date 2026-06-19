@@ -113,36 +113,39 @@ static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
   auto *name = dyn_cast<llvm::MDString>(node->getOperand(0));
   if (!name)
     return failure();
+  StringRef profName = name->getString();
 
   // Handle function entry count metadata.
-  if (name->getString() == llvm::MDProfLabels::FunctionEntryCount ||
-      name->getString() == llvm::MDProfLabels::SyntheticFunctionEntryCount) {
+  if (profName == llvm::MDProfLabels::FunctionEntryCount ||
+      profName == llvm::MDProfLabels::SyntheticFunctionEntryCount) {
     if (node->getNumOperands() < 2)
       return failure();
 
-    llvm::ConstantInt *entryCount =
-        llvm::mdconst::dyn_extract<llvm::ConstantInt>(node->getOperand(1));
-    if (!entryCount)
-      return failure();
+    auto getUInt64Metadata =
+        [](llvm::Metadata *metadata) -> std::optional<uint64_t> {
+      auto *constant = llvm::mdconst::dyn_extract<llvm::ConstantInt>(metadata);
+      if (!constant)
+        return std::nullopt;
+      return constant->getValue().tryZExtValue();
+    };
+
     std::optional<uint64_t> entryCountValue =
-        entryCount->getValue().tryZExtValue();
+        getUInt64Metadata(node->getOperand(1));
     if (!entryCountValue)
       return failure();
     if (auto funcOp = dyn_cast<LLVMFuncOp>(op)) {
       bool isSynthetic =
-          name->getString() == llvm::MDProfLabels::SyntheticFunctionEntryCount;
+          profName == llvm::MDProfLabels::SyntheticFunctionEntryCount;
       SmallVector<int64_t> importGUIDs;
       if (node->getNumOperands() > 2) {
         importGUIDs.reserve(node->getNumOperands() - 2);
         for (unsigned idx = 2, e = node->getNumOperands(); idx < e; ++idx) {
-          llvm::ConstantInt *guid =
-              llvm::mdconst::dyn_extract<llvm::ConstantInt>(
-                  node->getOperand(idx));
-          if (!guid)
-            return failure();
-          std::optional<uint64_t> guidValue = guid->getValue().tryZExtValue();
+          std::optional<uint64_t> guidValue =
+              getUInt64Metadata(node->getOperand(idx));
           if (!guidValue)
             return failure();
+          // Import GUIDs are unsigned 64-bit values in LLVM IR. Store the same
+          // bit pattern in MLIR's signed i64 array attribute.
           importGUIDs.push_back(static_cast<int64_t>(*guidValue));
         }
       }
@@ -159,7 +162,7 @@ static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
            << "expected function_entry_count to be attached to a function";
   }
 
-  if (name->getString() != llvm::MDProfLabels::BranchWeights)
+  if (profName != llvm::MDProfLabels::BranchWeights)
     return failure();
   // The branch_weights metadata must have at least 2 operands.
   if (node->getNumOperands() < 2)
