@@ -2014,8 +2014,11 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
       if (DenseI64ArrayAttr imports =
               function.getFunctionEntryCountImportsAttr()) {
         importGUIDs.emplace();
-        for (int64_t guid : imports.asArrayRef())
+        for (int64_t guid : imports.asArrayRef()) {
+          // The MLIR attribute preserves the unsigned GUID bit pattern in a
+          // signed i64 element.
           importGUIDs->insert(static_cast<uint64_t>(guid));
+        }
       }
       llvmFunc->setEntryCount(profileCount,
                               importGUIDs ? &*importGUIDs : nullptr);

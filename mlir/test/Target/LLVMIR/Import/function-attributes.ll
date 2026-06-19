@@ -193,19 +193,18 @@ define void @synthetic_entry_count() !prof !2 {
 
 ; CHECK-LABEL: @entry_count_imports
 ; CHECK-SAME:  attributes {function_entry_count = 7 : i64
-; CHECK-SAME:  function_entry_count_imports = array<i64: 1234>
+; CHECK-SAME:  function_entry_count_imports = array<i64: 4, 1234, -1>
 define void @entry_count_imports() !prof !3 {
   ret void
 }
 
-!3 = !{!"function_entry_count", i64 7, i64 1234}
+!3 = !{!"function_entry_count", i64 7, i64 1234, i64 -1, i64 4, i64 1234}
 
 ; // -----
 
 ; CHECK-LABEL: @synthetic_entry_count_imports
-; CHECK-SAME:  attributes {function_entry_count = 7 : i64
-; CHECK-SAME:  function_entry_count_imports = array<i64: 1234>
-; CHECK-SAME:  function_entry_count_synthetic
+; CHECK-NOT: function_entry_count
+; expected-warning @below {{unhandled function metadata}}
 define void @synthetic_entry_count_imports() !prof !4 {
   ret void
 }
@@ -222,6 +221,40 @@ define void @entry_count_malformed_import() !prof !5 {
 }
 
 !5 = !{!"function_entry_count", i64 7, !"bad"}
+
+; // -----
+
+; CHECK-LABEL: @entry_count_too_wide_count
+; CHECK-NOT: function_entry_count
+; expected-warning @below {{unhandled function metadata}}
+define void @entry_count_too_wide_count() !prof !6 {
+  ret void
+}
+
+!6 = !{!"function_entry_count", i128 18446744073709551616}
+
+; // -----
+
+; CHECK-LABEL: @entry_count_too_wide_import
+; CHECK-NOT: function_entry_count
+; expected-warning @below {{unhandled function metadata}}
+define void @entry_count_too_wide_import() !prof !7 {
+  ret void
+}
+
+!7 = !{!"function_entry_count", i64 7, i128 18446744073709551616}
+
+; // -----
+
+; Preserve the raw i64 metadata bit pattern. LLVM's semantic getEntryCount()
+; treats real uint64_t(-1) as unknown, but translation preserves the metadata.
+; CHECK-LABEL: @entry_count_negative_count
+; CHECK-SAME:  attributes {function_entry_count = -1 : i64}
+define void @entry_count_negative_count() !prof !8 {
+  ret void
+}
+
+!8 = !{!"function_entry_count", i64 -1}
 
 ; // -----
 

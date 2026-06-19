@@ -1893,42 +1893,50 @@ llvm.func @my_allocator(i64) attributes {passthrough = [["allocsize", "429496729
 // -----
 
 // CHECK-LABEL: @functionEntryCount
-// CHECK-SAME: !prof ![[PROF_ID:[0-9]*]]
+// CHECK-SAME: !prof ![[PROF_ID:[0-9]+]]
 llvm.func @functionEntryCount() attributes {function_entry_count = 4242 : i64} {
   llvm.return
 }
 
-// CHECK: ![[PROF_ID]] = !{!"function_entry_count", i64 4242}
+// CHECK-DAG: ![[PROF_ID]] = !{!"function_entry_count", i64 4242}
 
 // -----
 
 // CHECK-LABEL: @syntheticFunctionEntryCount
-// CHECK-SAME: !prof ![[SYNTH_PROF_ID:[0-9]*]]
-llvm.func @syntheticFunctionEntryCount() attributes {function_entry_count = 7 : i64, function_entry_count_synthetic} {
+// CHECK-SAME: !prof ![[SYNTH_PROF_ID:[0-9]+]]
+llvm.func @syntheticFunctionEntryCount() attributes {
+  function_entry_count = 7 : i64,
+  function_entry_count_synthetic
+} {
   llvm.return
 }
 
-// CHECK: ![[SYNTH_PROF_ID]] = !{!"synthetic_function_entry_count", i64 7}
+// CHECK-DAG: ![[SYNTH_PROF_ID]] = !{!"synthetic_function_entry_count", i64 7}
 
 // -----
 
 // CHECK-LABEL: @functionEntryCountWithImports
-// CHECK-SAME: !prof ![[IMPORTS_PROF_ID:[0-9]*]]
-llvm.func @functionEntryCountWithImports() attributes {function_entry_count = 7 : i64, function_entry_count_imports = array<i64: 1234>} {
+// CHECK-SAME: !prof ![[IMPORTS_PROF_ID:[0-9]+]]
+llvm.func @functionEntryCountWithImports() attributes {
+  function_entry_count = 7 : i64,
+  function_entry_count_imports = array<i64: 4, 1234, -1>
+} {
   llvm.return
 }
 
-// CHECK: ![[IMPORTS_PROF_ID]] = !{!"function_entry_count", i64 7, i64 1234}
+// CHECK-DAG: ![[IMPORTS_PROF_ID]] = !{!"function_entry_count", i64 7, i64 4, i64 1234, i64 -1}
 
 // -----
 
-// CHECK-LABEL: @syntheticFunctionEntryCountWithImports
-// CHECK-SAME: !prof ![[SYNTH_IMPORTS_PROF_ID:[0-9]*]]
-llvm.func @syntheticFunctionEntryCountWithImports() attributes {function_entry_count = 7 : i64, function_entry_count_imports = array<i64: 1234>, function_entry_count_synthetic} {
+// CHECK-LABEL: @functionEntryCountNegativeCount
+// CHECK-SAME: !prof ![[NEG_PROF_ID:[0-9]+]]
+llvm.func @functionEntryCountNegativeCount() attributes {
+  function_entry_count = -1 : i64
+} {
   llvm.return
 }
 
-// CHECK: ![[SYNTH_IMPORTS_PROF_ID]] = !{!"synthetic_function_entry_count", i64 7, i64 1234}
+// CHECK-DAG: ![[NEG_PROF_ID]] = !{!"function_entry_count", i64 -1}
 
 // -----
 

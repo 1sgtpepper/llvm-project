@@ -17,12 +17,16 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Target/LLVMIR/ModuleImport.h"
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MemoryModelRelaxationAnnotations.h"
+
+#include <algorithm>
+#include <optional>
 
 using namespace mlir;
 using namespace mlir::LLVM;
@@ -102,6 +106,14 @@ getSupportedMetadataImpl(llvm::LLVMContext &llvmContext) {
 /// Converts the given profiling metadata `node` to an MLIR profiling attribute
 /// and attaches it to the imported operation if the translation succeeds.
 /// Returns failure otherwise.
+static std::optional<uint64_t> getUInt64Metadata(llvm::Metadata *metadata) {
+  llvm::ConstantInt *constant =
+      llvm::mdconst::dyn_extract<llvm::ConstantInt>(metadata);
+  if (!constant)
+    return std::nullopt;
+  return constant->getValue().tryZExtValue();
+}
+
 static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
                                       Operation *op,
                                       LLVM::ModuleImport &moduleImport) {
@@ -119,33 +131,49 @@ static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
     if (node->getNumOperands() < 2)
       return failure();
 
-    llvm::ConstantInt *entryCount =
-        llvm::mdconst::dyn_extract<llvm::ConstantInt>(node->getOperand(1));
-    if (!entryCount)
-      return failure();
     if (auto funcOp = dyn_cast<LLVMFuncOp>(op)) {
       bool isSynthetic =
           name->getString() == llvm::MDProfLabels::SyntheticFunctionEntryCount;
-      SmallVector<int64_t> importGUIDs;
-      if (node->getNumOperands() > 2) {
-        importGUIDs.reserve(node->getNumOperands() - 2);
-        for (unsigned idx = 2, e = node->getNumOperands(); idx < e; ++idx) {
-          llvm::ConstantInt *guid =
-              llvm::mdconst::dyn_extract<llvm::ConstantInt>(
-                  node->getOperand(idx));
-          if (!guid)
-            return failure();
-          importGUIDs.push_back(
-              static_cast<int64_t>(guid->getValue().getZExtValue()));
-        }
+
+      // LLVM's semantic import-GUID API only reads trailing GUID operands from
+      // "function_entry_count" metadata. Do not model trailing operands on
+      // "synthetic_function_entry_count" as import GUIDs in MLIR.
+      if (isSynthetic && node->getNumOperands() > 2)
+        return failure();
+
+      std::optional<uint64_t> entryCount =
+          getUInt64Metadata(node->getOperand(1));
+      if (!entryCount)
+        return failure();
+
+      SmallVector<uint64_t> importGUIDValues;
+      importGUIDValues.reserve(node->getNumOperands() - 2);
+      for (unsigned idx = 2, e = node->getNumOperands(); idx < e; ++idx) {
+        std::optional<uint64_t> guidValue =
+            getUInt64Metadata(node->getOperand(idx));
+        if (!guidValue)
+          return failure();
+        importGUIDValues.push_back(*guidValue);
       }
 
-      funcOp.setFunctionEntryCount(entryCount->getZExtValue());
+      // Import GUIDs are semantically a set in LLVM. Canonicalize them as
+      // unsigned sorted-unique values before storing the bit patterns in MLIR.
+      llvm::sort(importGUIDValues);
+      importGUIDValues.erase(
+          std::unique(importGUIDValues.begin(), importGUIDValues.end()),
+          importGUIDValues.end());
+
+      funcOp.setFunctionEntryCount(*entryCount);
       if (isSynthetic)
         funcOp.setFunctionEntryCountSynthetic(true);
-      if (!importGUIDs.empty())
+      if (!importGUIDValues.empty()) {
+        SmallVector<int64_t> importGUIDs;
+        importGUIDs.reserve(importGUIDValues.size());
+        for (uint64_t guid : importGUIDValues)
+          importGUIDs.push_back(static_cast<int64_t>(guid));
         funcOp.setFunctionEntryCountImportsAttr(
             DenseI64ArrayAttr::get(builder.getContext(), importGUIDs));
+      }
       return success();
     }
     return op->emitWarning()
