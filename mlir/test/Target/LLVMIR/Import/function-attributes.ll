@@ -193,19 +193,18 @@ define void @synthetic_entry_count() !prof !2 {
 
 ; CHECK-LABEL: @entry_count_imports
 ; CHECK-SAME:  attributes {function_entry_count = 7 : i64
-; CHECK-SAME:  function_entry_count_imports = array<i64: 1234, -1>
+; CHECK-SAME:  function_entry_count_imports = array<i64: 4, 1234, -1>
 define void @entry_count_imports() !prof !3 {
   ret void
 }
 
-!3 = !{!"function_entry_count", i64 7, i64 1234, i64 -1}
+!3 = !{!"function_entry_count", i64 7, i64 1234, i64 -1, i64 4, i64 1234}
 
 ; // -----
 
 ; CHECK-LABEL: @synthetic_entry_count_imports
-; CHECK-SAME:  attributes {function_entry_count = 7 : i64
-; CHECK-SAME:  function_entry_count_imports = array<i64: 1234>
-; CHECK-SAME:  function_entry_count_synthetic
+; CHECK-NOT: function_entry_count
+; expected-warning @below {{unhandled function metadata}}
 define void @synthetic_entry_count_imports() !prof !4 {
   ret void
 }
@@ -244,6 +243,16 @@ define void @entry_count_wide_import() !prof !7 {
 }
 
 !7 = !{!"function_entry_count", i64 7, i128 18446744073709551616}
+
+; // -----
+
+; CHECK-LABEL: @entry_count_negative_count
+; CHECK-SAME:  attributes {function_entry_count = -1 : i64}
+define void @entry_count_negative_count() !prof !8 {
+  ret void
+}
+
+!8 = !{!"function_entry_count", i64 -1}
 
 ; // -----
 

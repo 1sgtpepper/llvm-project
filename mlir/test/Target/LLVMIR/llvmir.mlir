@@ -1922,13 +1922,13 @@ llvm.func @functionEntryCountWithImports() attributes {function_entry_count = 7 
 
 // -----
 
-// CHECK-LABEL: @syntheticFunctionEntryCountWithImports
-// CHECK-SAME: !prof ![[SYNTH_IMPORTS_PROF_ID:[0-9]*]]
-llvm.func @syntheticFunctionEntryCountWithImports() attributes {function_entry_count = 7 : i64, function_entry_count_imports = array<i64: 1234>, function_entry_count_synthetic} {
+// CHECK-LABEL: @negativeFunctionEntryCount
+// CHECK-SAME: !prof ![[NEGATIVE_COUNT_PROF_ID:[0-9]*]]
+llvm.func @negativeFunctionEntryCount() attributes {function_entry_count = -1 : i64} {
   llvm.return
 }
 
-// CHECK: ![[SYNTH_IMPORTS_PROF_ID]] = !{!"synthetic_function_entry_count", i64 7, i64 1234}
+// CHECK: ![[NEGATIVE_COUNT_PROF_ID]] = !{!"function_entry_count", i64 -1}
 
 // -----
 

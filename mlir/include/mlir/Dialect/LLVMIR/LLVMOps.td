@@ -2022,10 +2022,10 @@ def LLVM_LLVMFuncOp : LLVM_Op<"func", [
     The `function_entry_count` attribute models function-level `!prof`
     entry-count metadata. The `function_entry_count_synthetic` unit attribute
     selects the `"synthetic_function_entry_count"` metadata label, and
-    `function_entry_count_imports` preserves trailing import GUID operands.
-    Those GUID operands are unsigned 64-bit LLVM GUID bit patterns stored in a
-    signed i64 array attribute, and are preserved for both real and synthetic
-    entry-count metadata.
+    `function_entry_count_imports` represents the set of trailing import GUID
+    operands on real `"function_entry_count"` metadata. Those GUID operands are
+    unsigned 64-bit LLVM GUID bit patterns stored in a signed i64 array
+    attribute in unsigned sorted-unique order.
   }];
 
   let arguments = (ins

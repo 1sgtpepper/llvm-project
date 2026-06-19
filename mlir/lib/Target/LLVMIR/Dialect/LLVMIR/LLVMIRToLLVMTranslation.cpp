@@ -17,6 +17,7 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Target/LLVMIR/ModuleImport.h"
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/InlineAsm.h"
@@ -136,17 +137,28 @@ static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
     if (auto funcOp = dyn_cast<LLVMFuncOp>(op)) {
       bool isSynthetic =
           profName == llvm::MDProfLabels::SyntheticFunctionEntryCount;
+      if (isSynthetic && node->getNumOperands() > 2)
+        return failure();
+
+      SmallVector<uint64_t> importGUIDValues;
       SmallVector<int64_t> importGUIDs;
       if (node->getNumOperands() > 2) {
-        importGUIDs.reserve(node->getNumOperands() - 2);
+        importGUIDValues.reserve(node->getNumOperands() - 2);
         for (unsigned idx = 2, e = node->getNumOperands(); idx < e; ++idx) {
           std::optional<uint64_t> guidValue =
               getUInt64Metadata(node->getOperand(idx));
           if (!guidValue)
             return failure();
+          importGUIDValues.push_back(*guidValue);
+        }
+        llvm::sort(importGUIDValues);
+        for (uint64_t guidValue : importGUIDValues) {
+          if (!importGUIDs.empty() &&
+              static_cast<uint64_t>(importGUIDs.back()) == guidValue)
+            continue;
           // Import GUIDs are unsigned 64-bit values in LLVM IR. Store the same
           // bit pattern in MLIR's signed i64 array attribute.
-          importGUIDs.push_back(static_cast<int64_t>(*guidValue));
+          importGUIDs.push_back(static_cast<int64_t>(guidValue));
         }
       }
 
