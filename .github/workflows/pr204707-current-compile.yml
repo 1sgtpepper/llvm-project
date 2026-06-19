@@ -1,0 +1,49 @@
+name: PR204707 current MLIR compile
+
+on:
+  push:
+    branches:
+      - ci/pr204707-current-compile
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout LLVM
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld ninja-build
+
+      - name: Configure narrow MLIR build
+        run: |
+          cmake -S llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DLLVM_USE_LINKER=lld \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_TARGETS_TO_BUILD=host \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DMLIR_INCLUDE_TESTS=OFF
+
+      - name: Compile touched MLIR libraries
+        run: |
+          ninja -C build \
+            MLIRLLVMDialect \
+            MLIRTargetLLVMIRImport \
+            MLIRLLVMIRToLLVMTranslation \
+            MLIRTargetLLVMIRExport \
+            MLIRLLVMToLLVMIRTranslation
