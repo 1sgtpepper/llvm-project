@@ -1,0 +1,87 @@
+name: MLIR Cache Warm
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or SHA to test"
+        required: false
+        default: "sync-upstream"
+      run_lit:
+        description: "Run targeted MLIR lit tests after building tools"
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mlir-cache-warm-${{ github.event.inputs.ref || 'sync-upstream' }}
+  cancel-in-progress: false
+
+jobs:
+  mlir:
+    name: Warm MLIR cache
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout LLVM
+        uses: actions/checkout@v4
+        with:
+          repository: Kuhai9801/llvm-project
+          ref: ${{ github.event.inputs.ref || 'sync-upstream' }}
+          fetch-depth: 2
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld ninja-build
+
+      - name: Setup sccache
+        uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce
+        with:
+          key: mlir-narrow-ubuntu-24.04
+          max-size: 5G
+          variant: sccache
+
+      - name: Configure narrow MLIR build
+        run: |
+          cmake -S llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
+            -DLLVM_USE_LINKER=lld \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_TARGETS_TO_BUILD=host \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_TESTS=ON \
+            -DMLIR_INCLUDE_TESTS=ON
+
+      - name: Build MLIR libraries and tools
+        run: |
+          ninja -C build \
+            MLIRLLVMDialect \
+            MLIRTargetLLVMIRImport \
+            MLIRLLVMIRToLLVMTranslation \
+            MLIRTargetLLVMIRExport \
+            MLIRLLVMToLLVMIRTranslation \
+            mlir-translate \
+            mlir-opt \
+            FileCheck \
+            not
+
+      - name: Run targeted MLIR lit tests
+        if: ${{ github.event.inputs.run_lit == 'true' }}
+        run: |
+          python3 build/bin/llvm-lit -sv \
+            mlir/test/Dialect/LLVMIR/invalid.mlir \
+            mlir/test/Target/LLVMIR/Import/function-attributes.ll \
+            mlir/test/Target/LLVMIR/Import/function-entry-count-roundtrip.ll \
+            mlir/test/Target/LLVMIR/llvmir.mlir
