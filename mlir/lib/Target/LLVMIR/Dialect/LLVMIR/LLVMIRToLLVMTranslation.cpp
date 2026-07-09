@@ -100,7 +100,7 @@ getSupportedMetadataImpl(llvm::LLVMContext &llvmContext) {
   return convertibleMetadata;
 }
 
-/// Extracts an unsigned 64-bit integer from an LLVM metadata constant.
+/// Extracts an LLVM metadata constant as an unsigned 64-bit integer.
 static std::optional<uint64_t> getUInt64Metadata(llvm::Metadata *metadata) {
   auto *constant = llvm::mdconst::dyn_extract<llvm::ConstantInt>(metadata);
   if (!constant)
