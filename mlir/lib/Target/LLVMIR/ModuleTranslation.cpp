@@ -2006,15 +2006,17 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
 
     // Convert function_entry_count attribute to metadata.
     if (auto entryCount = function.getFunctionEntryCountAttr()) {
-      llvm::Function::ProfileCount profileCount(
-          entryCount.getEntryCount(),
-          convertProfileCountTypeToLLVM(entryCount.getCountType()));
       ArrayRef<uint64_t> imports = entryCount.getImports();
       llvm::DenseSet<llvm::GlobalValue::GUID> importGUIDs;
       if (!imports.empty())
         importGUIDs.insert(imports.begin(), imports.end());
-      llvmFunc->setEntryCount(profileCount,
-                              imports.empty() ? nullptr : &importGUIDs);
+      llvm::MDBuilder metadataBuilder(llvmFunc->getContext());
+      llvmFunc->setMetadata(
+          llvm::LLVMContext::MD_prof,
+          metadataBuilder.createFunctionEntryCount(
+              entryCount.getEntryCount(),
+              entryCount.getCountType() == ProfileCountType::Synthetic,
+              imports.empty() ? nullptr : &importGUIDs));
     }
 
     // Convert result attributes.

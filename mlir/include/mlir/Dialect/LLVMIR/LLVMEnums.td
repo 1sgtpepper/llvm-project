@@ -87,17 +87,14 @@ def AsmATTOrIntel : LLVM_EnumAttr<
 // ProfileCountType
 //===----------------------------------------------------------------------===//
 
-def ProfileCountReal : LLVM_EnumAttrCase<
-  /*string cppSym=*/"Real", /*string irSym=*/"real",
-  /*string llvmSym=*/"PCT_Real", /*int val=*/0>;
-def ProfileCountSynthetic : LLVM_EnumAttrCase<
-  /*string cppSym=*/"Synthetic", /*string irSym=*/"synthetic",
-  /*string llvmSym=*/"PCT_Synthetic", /*int val=*/1>;
-def ProfileCountTypeAttr : LLVM_EnumAttr<
+def ProfileCountReal : I64EnumAttrCase<
+  /*string sym=*/"Real", /*int val=*/0, /*string str=*/"real">;
+def ProfileCountSynthetic : I64EnumAttrCase<
+  /*string sym=*/"Synthetic", /*int val=*/1, /*string str=*/"synthetic">;
+def ProfileCountTypeAttr : I64EnumAttr<
   /*string name=*/"ProfileCountType",
-  /*string llvmName=*/"::llvm::Function::ProfileCountType",
   /*string description=*/"real or synthetic function entry count",
-  /*list<LLVM_EnumAttrCase> cases=*/[ProfileCountReal, ProfileCountSynthetic]> {
+  /*list<I64EnumAttrCase> cases=*/[ProfileCountReal, ProfileCountSynthetic]> {
   let cppNamespace = "::mlir::LLVM";
 }
 
