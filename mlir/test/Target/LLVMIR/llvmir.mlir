@@ -1919,7 +1919,7 @@ llvm.func @syntheticFunctionEntryCount() attributes {
 // CHECK-LABEL: @syntheticFunctionEntryCountWithImports
 // CHECK-SAME: !prof ![[SYNTH_IMPORTS_PROF_ID:[0-9]+]]
 llvm.func @syntheticFunctionEntryCountWithImports() attributes {
-  function_entry_count = #llvm.function_entry_count<entry_count = 7, count_type = synthetic, imports = [1234, 4, 1234]>
+  function_entry_count = #llvm.function_entry_count<entry_count = 7, count_type = synthetic, imports = 1234, 4, 1234>
 } {
   llvm.return
 }
@@ -1931,7 +1931,7 @@ llvm.func @syntheticFunctionEntryCountWithImports() attributes {
 // CHECK-LABEL: @functionEntryCountWithImports
 // CHECK-SAME: !prof ![[IMPORTS_PROF_ID:[0-9]+]]
 llvm.func @functionEntryCountWithImports() attributes {
-  function_entry_count = #llvm.function_entry_count<entry_count = 7, imports = [1234, 4, 18446744073709551615, 1234]>
+  function_entry_count = #llvm.function_entry_count<entry_count = 7, imports = 1234, 4, 18446744073709551615, 1234>
 } {
   llvm.return
 }

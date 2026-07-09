@@ -191,7 +191,7 @@ define void @synthetic_entry_count() !prof !2 {
 ; // -----
 
 ; CHECK-LABEL: @entry_count_imports
-; CHECK-SAME:  attributes {function_entry_count = #llvm.function_entry_count<entry_count = 7, imports = [1234, 18446744073709551615, 4, 1234]>}
+; CHECK-SAME:  attributes {function_entry_count = #llvm.function_entry_count<entry_count = 7, imports = 1234, 18446744073709551615, 4, 1234>}
 define void @entry_count_imports() !prof !3 {
   ret void
 }
@@ -201,7 +201,7 @@ define void @entry_count_imports() !prof !3 {
 ; // -----
 
 ; CHECK-LABEL: @synthetic_entry_count_imports
-; CHECK-SAME:  attributes {function_entry_count = #llvm.function_entry_count<entry_count = 7, count_type = synthetic, imports = [1234]>}
+; CHECK-SAME:  attributes {function_entry_count = #llvm.function_entry_count<entry_count = 7, count_type = synthetic, imports = 1234>}
 define void @synthetic_entry_count_imports() !prof !4 {
   ret void
 }

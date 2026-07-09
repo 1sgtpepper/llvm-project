@@ -150,9 +150,9 @@ static LogicalResult setProfilingAttr(OpBuilder &builder, llvm::MDNode *node,
     }
 
     if (auto funcOp = dyn_cast<LLVMFuncOp>(op)) {
-      funcOp.setFunctionEntryCountAttr(FunctionEntryCountAttr::get(
-          builder.getContext(), *entryCountValue, profileCountType,
-          importGUIDValues));
+      funcOp.setFunctionEntryCountAttr(
+          FunctionEntryCountAttr::get(builder.getContext(), *entryCountValue,
+                                      profileCountType, importGUIDValues));
       return success();
     }
     return op->emitWarning()
