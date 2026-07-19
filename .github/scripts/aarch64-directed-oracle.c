@@ -13,6 +13,9 @@
 
 static volatile uint64_t branch_sink;
 
+typedef __int128 int128_t;
+typedef unsigned __int128 uint128_t;
+
 static uint64_t mix(uint64_t state, uint64_t value) {
   return state ^ (value + UINT64_C(0x9e3779b97f4a7c15) + (state << 6) +
                   (state >> 2));
@@ -92,6 +95,35 @@ DEFINE_FLOAT_BRANCH(branch_float_le, <=, 307, 308)
 DEFINE_FLOAT_BRANCH(branch_float_gt, >, 309, 310)
 DEFINE_FLOAT_BRANCH(branch_float_ge, >=, 311, 312)
 
+#define DEFINE_I128_IMMEDIATE_BRANCH(NAME, TYPE, OP, CONSTANT, TRUE_VALUE,     \
+                                     FALSE_VALUE)                             \
+  NOINLINE uint64_t NAME(TYPE value) {                                        \
+    unsigned condition = (unsigned)(value OP (CONSTANT));                     \
+    if ((condition & 1u) != 0u) {                                             \
+      branch_sink += UINT64_C(19);                                            \
+      return UINT64_C(TRUE_VALUE);                                            \
+    }                                                                          \
+    branch_sink += UINT64_C(23);                                              \
+    return UINT64_C(FALSE_VALUE);                                             \
+  }
+
+DEFINE_I128_IMMEDIATE_BRANCH(branch_i128_eq_neg1, int128_t, ==,
+                             (int128_t)-1, 401, 402)
+DEFINE_I128_IMMEDIATE_BRANCH(branch_i128_lt_zero, int128_t, <, (int128_t)0,
+                             403, 404)
+DEFINE_I128_IMMEDIATE_BRANCH(branch_i128_ge_2p64, int128_t, >=,
+                             ((int128_t)1 << 64), 405, 406)
+DEFINE_I128_IMMEDIATE_BRANCH(branch_i128_lt_neg_2p64, int128_t, <,
+                             -((int128_t)1 << 64), 407, 408)
+DEFINE_I128_IMMEDIATE_BRANCH(branch_u128_eq_2p64, uint128_t, ==,
+                             ((uint128_t)1 << 64), 409, 410)
+DEFINE_I128_IMMEDIATE_BRANCH(branch_u128_lt_2p64, uint128_t, <,
+                             ((uint128_t)1 << 64), 411, 412)
+DEFINE_I128_IMMEDIATE_BRANCH(branch_u128_gt_u64max, uint128_t, >,
+                             (uint128_t)UINT64_MAX, 413, 414)
+DEFINE_I128_IMMEDIATE_BRANCH(branch_u128_ge_2p127, uint128_t, >=,
+                             ((uint128_t)1 << 127), 415, 416)
+
 int main(void) {
   static const int32_t signed32_values[] = {
       INT32_MIN, INT32_MIN + 1, -65537, -1, 0, 1, 65535, INT32_MAX - 1,
@@ -105,6 +137,15 @@ int main(void) {
       UINT64_C(0x8000000000000000), UINT64_MAX - 1, UINT64_MAX};
   static const double float_values[] = {
       -INFINITY, -1.0, -0.0, 0.0, 1.0, INFINITY, NAN};
+  static const int128_t signed128_values[] = {
+      -((int128_t)1 << 100), -((int128_t)1 << 64),
+      -((int128_t)1 << 64) + 1, (int128_t)INT64_MIN, -1, 0, 1,
+      (int128_t)INT64_MAX, ((int128_t)1 << 64) - 1,
+      ((int128_t)1 << 64), ((int128_t)1 << 100)};
+  static const uint128_t unsigned128_values[] = {
+      0, 1, (uint128_t)UINT64_MAX, ((uint128_t)1 << 64),
+      ((uint128_t)1 << 64) + 1, ((uint128_t)1 << 100),
+      ((uint128_t)1 << 127), ~(uint128_t)0};
   uint64_t state = UINT64_C(0xcbf29ce484222325);
 
   for (size_t i = 0; i < sizeof(signed32_values) / sizeof(signed32_values[0]);
@@ -160,6 +201,24 @@ int main(void) {
       state = mix(state, branch_float_gt(a, b));
       state = mix(state, branch_float_ge(a, b));
     }
+  }
+
+  for (size_t i = 0;
+       i < sizeof(signed128_values) / sizeof(signed128_values[0]); ++i) {
+    int128_t value = signed128_values[i];
+    state = mix(state, branch_i128_eq_neg1(value));
+    state = mix(state, branch_i128_lt_zero(value));
+    state = mix(state, branch_i128_ge_2p64(value));
+    state = mix(state, branch_i128_lt_neg_2p64(value));
+  }
+
+  for (size_t i = 0;
+       i < sizeof(unsigned128_values) / sizeof(unsigned128_values[0]); ++i) {
+    uint128_t value = unsigned128_values[i];
+    state = mix(state, branch_u128_eq_2p64(value));
+    state = mix(state, branch_u128_lt_2p64(value));
+    state = mix(state, branch_u128_gt_u64max(value));
+    state = mix(state, branch_u128_ge_2p127(value));
   }
 
   state = mix(state, branch_sink);
