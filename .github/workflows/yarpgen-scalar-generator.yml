@@ -1,0 +1,41 @@
+name: YARPGen scalar generator
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/yarpgen-scalar-generator.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-generator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout YARPGen scalar
+        uses: actions/checkout@v4
+        with:
+          repository: intel/yarpgen
+          ref: 30072f7779b68a6efab72bc1f56b4f76a2706e03
+
+      - name: Build generator
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -- -j2
+
+      - name: Package generator
+        run: |
+          mkdir -p package/bin
+          cp build/yarpgen package/bin/
+          printf '%s\n' 30072f7779b68a6efab72bc1f56b4f76a2706e03 > package/revision.txt
+          tar -czf yarpgen-scalar-generator.tar.gz -C package .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yarpgen-scalar-generator
+          path: yarpgen-scalar-generator.tar.gz
+          retention-days: 1
