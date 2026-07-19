@@ -22,7 +22,7 @@ on:
       start_seed:
         description: First seed before shard offsets
         required: true
-        default: "303000"
+        default: "303800"
       cases_per_shard:
         description: Number of generated programs per shard
         required: true
@@ -144,7 +144,7 @@ jobs:
 
       - name: Run six-oracle differential lane
         env:
-          BASE_SEED: ${{ inputs.start_seed || '303000' }}
+          BASE_SEED: ${{ inputs.start_seed || '303800' }}
           CASES_PER_SHARD: ${{ inputs.cases_per_shard || '200' }}
           SHARD: ${{ matrix.shard }}
         shell: bash

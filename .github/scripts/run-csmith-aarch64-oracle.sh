@@ -156,7 +156,7 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
   rm -f "$RESULT_ROOT/work"/*
 
   if ! timeout 20 "$CSMITH" --seed "$seed" --no-packed-struct \
-      --no-unions --no-bitfields --no-volatiles \
+      --no-unions --no-bitfields \
       --max-funcs 6 --max-block-depth 6 --max-expr-complexity 30 \
       --output "$RESULT_ROOT/work/test.c"; then
     generation_fail_count=$((generation_fail_count + 1))
@@ -310,7 +310,7 @@ fi
 
 cat >"$RESULT_ROOT/summary.txt" <<EOF
 status=$status
-profile=aarch64-six-oracle-nonvolatile
+profile=aarch64-six-oracle-volatile-enabled
 start_seed=$START_SEED
 last_seed=$last_seed
 case_count=$CASE_COUNT
