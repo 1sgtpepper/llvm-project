@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - correctness-validation
+    paths:
+      - .github/workflows/llvm-correctness-tools.yml
   workflow_dispatch:
 
 permissions:
