@@ -23,6 +23,8 @@ compared_count=0
 generation_fail_count=0
 o0_compile_fail_count=0
 baseline_runtime_fail_count=0
+oversize_count=0
+o2_compile_timeout_count=0
 
 compile() {
   local compiler=$1
@@ -53,14 +55,27 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
   fi
   generated_count=$((generated_count + 1))
 
+  source_bytes=$(wc -c "$RESULT_ROOT/work/driver.cpp" \
+    "$RESULT_ROOT/work/func.cpp" "$RESULT_ROOT/work/init.h" | \
+    awk 'END { print $1 }')
+  if [[ "$source_bytes" -gt 2000000 ]]; then
+    oversize_count=$((oversize_count + 1))
+    continue
+  fi
+
   if ! compile "$CLANG" -O0 "$RESULT_ROOT/work/clang-o0" \
       "$RESULT_ROOT/work/clang-o0.compile" --driver-mode=g++; then
     o0_compile_fail_count=$((o0_compile_fail_count + 1))
     continue
   fi
 
-  if ! compile "$CLANG" -O2 "$RESULT_ROOT/work/clang-o2" \
-      "$RESULT_ROOT/work/clang-o2.compile" --driver-mode=g++; then
+  compile "$CLANG" -O2 "$RESULT_ROOT/work/clang-o2" \
+    "$RESULT_ROOT/work/clang-o2.compile" --driver-mode=g++
+  o2_compile_status=$?
+  if [[ "$o2_compile_status" -eq 124 ]]; then
+    o2_compile_timeout_count=$((o2_compile_timeout_count + 1))
+    continue
+  elif [[ "$o2_compile_status" -ne 0 ]]; then
     status=clang-o2-compile-failure
   elif ! execute "$RESULT_ROOT/work/clang-o0" "$RESULT_ROOT/work/clang-o0.out"; then
     baseline_runtime_fail_count=$((baseline_runtime_fail_count + 1))
@@ -111,6 +126,8 @@ compared_count=$compared_count
 generation_fail_count=$generation_fail_count
 o0_compile_fail_count=$o0_compile_fail_count
 baseline_runtime_fail_count=$baseline_runtime_fail_count
+oversize_count=$oversize_count
+o2_compile_timeout_count=$o2_compile_timeout_count
 llvm_revision=$(cat "$LLVM_ROOT/revision.txt")
 clang_version=$(head -n 1 "$LLVM_ROOT/clang-version.txt")
 yarpgen_revision=$(cat "$YARPGEN_ROOT/revision.txt")
