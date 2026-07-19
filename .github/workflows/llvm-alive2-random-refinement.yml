@@ -1,0 +1,223 @@
+name: LLVM random refinement validation
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-alive2-random-refinement.yml
+  workflow_dispatch:
+    inputs:
+      start_seed:
+        description: First llvm-stress seed
+        required: true
+        default: "700000"
+      case_count:
+        description: Number of IR modules
+        required: true
+        default: "100"
+
+permissions:
+  contents: read
+
+env:
+  LLVM_REVISION: 8042e61d6ae99347e8cab040b324b33cabfb1d4a
+  ALIVE2_REVISION: 1d1bc4fe3135492a8c1166838c776530de479420
+
+jobs:
+  refinement:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/workflows/llvm-alive2-random-refinement.yml
+
+      - name: Check out pinned LLVM source
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-project
+          ref: 8042e61d6ae99347e8cab040b324b33cabfb1d4a
+          path: llvm-source
+          fetch-depth: 1
+
+      - name: Check out pinned Alive2 source
+        uses: actions/checkout@v4
+        with:
+          repository: AliveToolkit/alive2
+          ref: 1d1bc4fe3135492a8c1166838c776530de479420
+          path: alive2-source
+          fetch-depth: 1
+
+      - name: Verify source revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C llvm-source rev-parse HEAD)" = "$LLVM_REVISION"
+          test "$(git -C alive2-source rev-parse HEAD)" = "$ALIVE2_REVISION"
+          test -z "$(git -C llvm-source status --porcelain)"
+          test -z "$(git -C alive2-source status --porcelain)"
+
+      - name: Install refinement checker dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            libz3-dev \
+            ninja-build \
+            re2c \
+            z3
+
+      - name: Configure pinned LLVM for Alive2
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p results
+          cmake -S llvm-source/llvm -B llvm-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=ON \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_ENABLE_EH=ON \
+            -DLLVM_ENABLE_RTTI=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_TARGETS_TO_BUILD=X86 \
+            2>&1 | tee results/llvm-configure.log
+
+      - name: Build pinned LLVM tools
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build llvm-build --target opt llvm-stress -- -j4 \
+            2>&1 | tee results/llvm-build.log
+
+      - name: Configure Alive2 translation validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S alive2-source -B alive2-build -G Ninja \
+            -DBUILD_TV=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$PWD/llvm-build" \
+            2>&1 | tee results/alive2-configure.log
+
+      - name: Build Alive2 translation validator
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build alive2-build --target alive-tv -- -j4 \
+            2>&1 | tee results/alive2-build.log
+
+      - name: Verify refinement checker smoke case
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >smoke.ll <<'EOF'
+          define i32 @f(i32 %x) {
+            %a = add i32 %x, 0
+            ret i32 %a
+          }
+          EOF
+          alive2-build/alive-tv -passes=instcombine smoke.ll \
+            >results/smoke.log 2>&1
+          grep -F 'Transformation seems to be correct!' results/smoke.log
+          test ! "$(grep -F "Transformation doesn't verify!" results/smoke.log || true)"
+
+      - name: Run random O2 refinement campaign
+        id: campaign
+        continue-on-error: true
+        env:
+          START_SEED: ${{ inputs.start_seed || '700000' }}
+          CASE_COUNT: ${{ inputs.case_count || '100' }}
+        shell: bash
+        run: |
+          set -u
+          mkdir -p results/candidate results/work
+          status=no-counterexample
+          generated_count=0
+          verified_count=0
+          unsupported_count=0
+          timeout_count=0
+          checker_failure_count=0
+          last_seed=$START_SEED
+
+          for ((offset = 0; offset < CASE_COUNT; offset++)); do
+            seed=$((START_SEED + offset))
+            last_seed=$seed
+            input=results/work/input.ll
+            log=results/work/alive-tv.log
+            optimized=results/work/optimized.ll
+
+            if ! llvm-build/bin/llvm-stress -seed="$seed" -size=25 \
+                >"$input" 2>results/work/llvm-stress.err; then
+              checker_failure_count=$((checker_failure_count + 1))
+              continue
+            fi
+            generated_count=$((generated_count + 1))
+
+            timeout 30 alive2-build/alive-tv -passes='default<O2>' "$input" \
+              >"$log" 2>&1
+            result=$?
+            if [[ "$result" -eq 124 ]]; then
+              timeout_count=$((timeout_count + 1))
+              continue
+            fi
+            if grep -Fq "Transformation doesn't verify!" "$log"; then
+              status=counterexample
+              cp "$input" results/candidate/input.ll
+              cp "$log" results/candidate/alive-tv.log
+              llvm-build/bin/opt -S -passes='default<O2>' "$input" \
+                -o "$optimized" >results/work/opt.log 2>&1 || true
+              cp "$optimized" results/candidate/optimized.ll 2>/dev/null || true
+              printf 'seed=%s\n' "$seed" >results/candidate/candidate.txt
+              sha256sum results/candidate/* \
+                >results/candidate/sha256sums.txt
+              break
+            fi
+            if [[ "$result" -ne 0 ]] || grep -Eiq \
+                'unsupported|not supported|could not translate|ERROR:' "$log"; then
+              unsupported_count=$((unsupported_count + 1))
+              continue
+            fi
+            if grep -Fq 'Transformation seems to be correct!' "$log"; then
+              verified_count=$((verified_count + 1))
+            else
+              checker_failure_count=$((checker_failure_count + 1))
+            fi
+          done
+
+          {
+            printf 'status=%s\n' "$status"
+            printf 'start_seed=%s\n' "$START_SEED"
+            printf 'last_seed=%s\n' "$last_seed"
+            printf 'case_count=%s\n' "$CASE_COUNT"
+            printf 'generated_count=%s\n' "$generated_count"
+            printf 'verified_count=%s\n' "$verified_count"
+            printf 'unsupported_count=%s\n' "$unsupported_count"
+            printf 'timeout_count=%s\n' "$timeout_count"
+            printf 'checker_failure_count=%s\n' "$checker_failure_count"
+            printf 'llvm_revision=%s\n' "$LLVM_REVISION"
+            printf 'alive2_revision=%s\n' "$ALIVE2_REVISION"
+            llvm-build/bin/opt --version | head -n1
+            alive2-build/alive-tv --version 2>&1 | head -n1 || true
+            z3 --version
+          } | tee results/summary.txt
+
+          test "$status" = no-counterexample
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llvm-alive2-random-refinement-results
+          path: results
+          retention-days: 2
+
+      - name: Enforce counterexample-free campaign
+        if: always()
+        env:
+          CAMPAIGN_OUTCOME: ${{ steps.campaign.outcome }}
+        shell: bash
+        run: test "$CAMPAIGN_OUTCOME" = success
