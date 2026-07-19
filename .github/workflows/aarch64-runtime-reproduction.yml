@@ -165,6 +165,7 @@ jobs:
         run: |
           set -euo pipefail
           sha256sum -c bundle/binary-sha256.txt
+          chmod +x bundle/gcc-o0 bundle/gcc-o2 bundle/clang-o{0,1,2,3}
           expected=16859487666159312926
           uname -a | tee bundle/results/native-provenance.txt
           for binary in gcc-o0 gcc-o2 clang-o0 clang-o1 clang-o2 clang-o3; do
