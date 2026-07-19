@@ -43,7 +43,7 @@ while IFS= read -r source; do
   last_test=${source#"$TEST_ROOT/"}
   rm -f "$RESULT_ROOT/work"/*
 
-  if grep -Eq 'dg-(skip-if|require-effective-target|options|additional-options|add-options|xfail-run-if|additional-sources)|__attribute__[[:space:]]*\(\([[:space:]]*(optimize|target)' \
+  if grep -Eq 'dg-(skip-if|require-effective-target|options|additional-options|add-options|xfail-run-if|additional-sources)|__attribute__.*(optimize|target)[[:space:]]*\(' \
       "$source"; then
     directive_skip_count=$((directive_skip_count + 1))
     continue
