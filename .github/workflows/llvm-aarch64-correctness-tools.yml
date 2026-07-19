@@ -1,0 +1,97 @@
+name: LLVM AArch64 correctness tools
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-aarch64-correctness-tools.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LLVM_SOURCE_REVISION: 8042e61d6ae99347e8cab040b324b33cabfb1d4a
+
+jobs:
+  build-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: Check out pinned upstream source
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-project
+          ref: 8042e61d6ae99347e8cab040b324b33cabfb1d4a
+          path: source
+          fetch-depth: 1
+
+      - name: Verify source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual_revision="$(git -C source rev-parse HEAD)"
+          test "$actual_revision" = "$LLVM_SOURCE_REVISION"
+          test -z "$(git -C source status --porcelain)"
+
+      - name: Configure
+        run: >
+          cmake -S source/llvm -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DLLVM_ENABLE_ASSERTIONS=OFF
+          -DLLVM_ENABLE_PROJECTS=clang
+          -DLLVM_TARGETS_TO_BUILD="X86;AArch64"
+          -DLLVM_INCLUDE_TESTS=OFF
+          -DLLVM_INCLUDE_BENCHMARKS=OFF
+          -DLLVM_INCLUDE_EXAMPLES=OFF
+          -DLLVM_ENABLE_TERMINFO=OFF
+          -DLLVM_ENABLE_ZLIB=OFF
+          -DLLVM_ENABLE_ZSTD=OFF
+
+      - name: Build correctness tools
+        run: >
+          cmake --build build
+          --target clang opt lli llc llvm-stress llvm-reduce
+          -- -j4
+
+      - name: Record toolchain provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'llvm_source_revision=%s\n' "$(git -C source rev-parse HEAD)"
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'runner_image=%s\n' "${ImageOS:-unknown}"
+            printf 'runner_image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'cmake_version=%s\n' "$(cmake --version | head -n1)"
+            printf 'ninja_version=%s\n' "$(ninja --version)"
+          } | tee build/provenance.txt
+          build/bin/clang --version | tee build/clang-version.txt
+          build/bin/llc --version | tee build/llc-version.txt
+
+      - name: Package correctness tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -h -C build -czf llvm-aarch64-correctness-tools.tar.gz \
+            bin/clang \
+            bin/opt \
+            bin/lli \
+            bin/llc \
+            bin/llvm-stress \
+            bin/llvm-reduce \
+            lib/clang \
+            provenance.txt \
+            clang-version.txt \
+            llc-version.txt
+          sha256sum llvm-aarch64-correctness-tools.tar.gz \
+            | tee llvm-aarch64-correctness-tools.tar.gz.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llvm-aarch64-correctness-tools
+          path: |
+            llvm-aarch64-correctness-tools.tar.gz
+            llvm-aarch64-correctness-tools.tar.gz.sha256
+          retention-days: 2
