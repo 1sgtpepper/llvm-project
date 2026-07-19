@@ -1,0 +1,33 @@
+name: Csmith generator
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-generator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Fetch pinned Csmith
+        run: |
+          git clone --filter=blob:none https://github.com/csmith-project/csmith.git csmith
+          git -C csmith checkout 0cdc710315cfee9035e22ef4363ca479270d1934
+
+      - name: Build generator
+        run: |
+          cmake -S csmith -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PWD/install"
+          cmake --build build --target install -- -j2
+
+      - name: Package generator
+        run: tar -C install -czf csmith-generator.tar.gz bin include
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csmith-generator
+          path: csmith-generator.tar.gz
+          retention-days: 1
