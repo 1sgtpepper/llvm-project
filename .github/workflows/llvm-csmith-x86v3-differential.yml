@@ -1,0 +1,95 @@
+name: LLVM x86-64-v3 differential correctness
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-csmith-x86v3-differential.yml
+      - .github/scripts/run-csmith-x86v3-differential.sh
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the LLVM correctness tools artifact
+        required: true
+        default: "29673050071"
+      csmith_run_id:
+        description: Workflow run containing the Csmith generator artifact
+        required: true
+        default: "29670304821"
+      start_seed:
+        description: First seed before shard offsets
+        required: true
+        default: "118000"
+      cases_per_shard:
+        description: Number of generated programs per shard
+        required: true
+        default: "1000"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify x86-64-v3 runner support
+        run: |
+          for feature in avx avx2 bmi1 bmi2 f16c fma lzcnt movbe xsave; do
+            grep -qw "$feature" /proc/cpuinfo || {
+              echo "runner lacks x86-64-v3 feature: $feature"
+              exit 1
+            }
+          done
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29673050071' }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: csmith-generator
+          path: artifacts/csmith
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.csmith_run_id || '29670304821' }}
+
+      - name: Extract tools
+        run: |
+          mkdir -p tools/llvm tools/csmith
+          tar -xzf artifacts/llvm/llvm-correctness-tools.tar.gz -C tools/llvm
+          tar -xzf artifacts/csmith/csmith-generator.tar.gz -C tools/csmith
+          chmod +x tools/llvm/bin/* tools/csmith/bin/csmith
+
+      - name: Run differential lane
+        env:
+          BASE_SEED: ${{ inputs.start_seed || '118000' }}
+          CASES_PER_SHARD: ${{ inputs.cases_per_shard || '1000' }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          start_seed=$((BASE_SEED + SHARD * CASES_PER_SHARD))
+          bash .github/scripts/run-csmith-x86v3-differential.sh \
+            "$PWD/tools/llvm" \
+            "$PWD/tools/csmith" \
+            "$start_seed" \
+            "$CASES_PER_SHARD" \
+            "$PWD/results"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: csmith-x86v3-results-${{ matrix.shard }}
+          path: results
+          retention-days: 1
