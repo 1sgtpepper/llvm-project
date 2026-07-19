@@ -1,0 +1,179 @@
+name: LLVM test-suite AArch64 O2 correctness
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-test-suite-aarch64-o2.yml
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the pinned AArch64 tools artifact
+        required: true
+        default: "29679376309"
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  TEST_SUITE_REVISION: 3396731658fc485536a2aa690b5eff7b3087df0b
+
+jobs:
+  single-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github
+            llvm/utils/lit
+
+      - name: Check out pinned test-suite source
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-test-suite
+          ref: 3396731658fc485536a2aa690b5eff7b3087df0b
+          path: test-suite
+          fetch-depth: 1
+
+      - name: Verify test-suite revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C test-suite rev-parse HEAD)" = "$TEST_SUITE_REVISION"
+          test -z "$(git -C test-suite status --porcelain)"
+
+      - name: Install AArch64 execution environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            qemu-user
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-aarch64-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29679376309' }}
+
+      - name: Verify and extract pinned compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools/llvm results
+          (
+            cd artifacts/llvm
+            sha256sum -c llvm-aarch64-correctness-tools.tar.gz.sha256
+          )
+          cp artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz.sha256 \
+            results/
+          tar -xzf artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz \
+            -C tools/llvm
+          chmod +x tools/llvm/bin/*
+          ln -s clang tools/llvm/bin/clang++
+
+      - name: Verify cross-link and execution path
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#include <stdio.h>\nint main(void) { puts("suite-aarch64-ok"); }\n' \
+            > smoke.c
+          tools/llvm/bin/clang --target=aarch64-linux-gnu \
+            --gcc-toolchain=/usr -O2 -static smoke.c -o smoke
+          test "$(qemu-aarch64 ./smoke)" = suite-aarch64-ok
+
+      - name: Record provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'llvm_artifact_run_id=%s\n' \
+              "${{ inputs.llvm_run_id || '29679376309' }}"
+            printf 'test_suite_revision=%s\n' \
+              "$(git -C test-suite rev-parse HEAD)"
+            uname -a
+            tools/llvm/bin/clang --version | head -n1
+            aarch64-linux-gnu-g++ --version | head -n1
+            qemu-aarch64 --version | head -n1
+          } | tee results/provenance.txt
+
+      - name: Configure AArch64 SingleSource at O2
+        id: configure
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake -S test-suite -B test-suite-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$PWD/tools/llvm/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$PWD/tools/llvm/bin/clang++" \
+            -DCMAKE_C_COMPILER_TARGET=aarch64-linux-gnu \
+            -DCMAKE_CXX_COMPILER_TARGET=aarch64-linux-gnu \
+            -DCMAKE_C_FLAGS_RELEASE='-O2 --gcc-toolchain=/usr' \
+            -DCMAKE_CXX_FLAGS_RELEASE='-O2 --gcc-toolchain=/usr' \
+            -DCMAKE_EXE_LINKER_FLAGS=-static \
+            -DTEST_SUITE_SUBDIRS=SingleSource \
+            -DTEST_SUITE_RUN_UNDER=qemu-aarch64 \
+            -DTEST_SUITE_USER_MODE_EMULATION=ON \
+            -DTEST_SUITE_COLLECT_CODE_SIZE=OFF \
+            2>&1 | tee results/configure.log
+
+      - name: Build AArch64 SingleSource
+        id: build
+        if: steps.configure.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cmake --build test-suite-build -- -j4 \
+            2>&1 | tee results/build.log
+
+      - name: Execute AArch64 SingleSource
+        id: execute
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 llvm/utils/lit/lit.py -sv test-suite-build \
+            2>&1 | tee results/lit.log
+
+      - name: Record outcome
+        if: always()
+        shell: bash
+        run: |
+          cat >results/summary.txt <<EOF
+          configure=${{ steps.configure.outcome }}
+          build=${{ steps.build.outcome }}
+          execute=${{ steps.execute.outcome }}
+          llvm_revision=$(sed -n 's/^llvm_source_revision=//p' tools/llvm/provenance.txt)
+          test_suite_revision=$(git -C test-suite rev-parse HEAD)
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llvm-test-suite-aarch64-o2-results
+          path: results
+          retention-days: 2
+
+      - name: Enforce successful suite
+        if: always()
+        env:
+          CONFIGURE_OUTCOME: ${{ steps.configure.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          EXECUTE_OUTCOME: ${{ steps.execute.outcome }}
+        shell: bash
+        run: |
+          test "$CONFIGURE_OUTCOME" = success
+          test "$BUILD_OUTCOME" = success
+          test "$EXECUTE_OUTCOME" = success
