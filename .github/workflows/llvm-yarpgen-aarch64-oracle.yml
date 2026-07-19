@@ -20,7 +20,7 @@ on:
       start_seed:
         description: First seed before shard offsets
         required: true
-        default: "400000"
+        default: "402000"
       cases_per_shard:
         description: Number of generated programs per shard
         required: true

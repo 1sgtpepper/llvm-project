@@ -108,7 +108,7 @@ execute_native() {
 
 execute_aarch64() {
   local stem=$1
-  timeout 12 "$QEMU" "$RESULT_ROOT/work/$stem" \
+  timeout 30 "$QEMU" "$RESULT_ROOT/work/$stem" \
     >"$RESULT_ROOT/work/$stem.out" \
     2>"$RESULT_ROOT/work/$stem.err"
   local result=$?
