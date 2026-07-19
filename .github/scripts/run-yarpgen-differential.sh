@@ -18,6 +18,8 @@ ulimit -c 0
 
 status=no-mismatch
 last_seed=$START_SEED
+generated_count=0
+compared_count=0
 
 compile() {
   local compiler=$1
@@ -41,11 +43,12 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
   last_seed=$seed
   rm -f "$RESULT_ROOT/work"/*
 
-  if ! timeout 20 "$YARPGEN" --seed "$seed" --std=c++ \
+  if ! timeout 20 "$YARPGEN" --seed="$seed" --std=c++ \
       --emit-align-attr=none --emit-pragmas=none \
-      --out-dir "$RESULT_ROOT/work"; then
+      --out-dir="$RESULT_ROOT/work"; then
     continue
   fi
+  generated_count=$((generated_count + 1))
 
   if ! compile "$CLANG" -O0 "$RESULT_ROOT/work/clang-o0" \
       "$RESULT_ROOT/work/clang-o0.compile" --driver-mode=g++; then
@@ -62,6 +65,7 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
   elif ! cmp -s "$RESULT_ROOT/work/clang-o0.out" "$RESULT_ROOT/work/clang-o2.out"; then
     status=clang-o2-output-mismatch
   else
+    compared_count=$((compared_count + 1))
     continue
   fi
 
@@ -89,14 +93,24 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
   break
 done
 
+if [[ "$status" == no-mismatch && "$compared_count" -eq 0 ]]; then
+  status=no-valid-cases
+fi
+
 cat >"$RESULT_ROOT/summary.txt" <<EOF
 status=$status
 start_seed=$START_SEED
 last_seed=$last_seed
 case_count=$CASE_COUNT
+generated_count=$generated_count
+compared_count=$compared_count
 llvm_revision=$(cat "$LLVM_ROOT/revision.txt")
 clang_version=$(head -n 1 "$LLVM_ROOT/clang-version.txt")
 yarpgen_revision=$(cat "$YARPGEN_ROOT/revision.txt")
 EOF
 
 printf '%s\n' "$status"
+
+if [[ "$status" == no-valid-cases ]]; then
+  exit 2
+fi
