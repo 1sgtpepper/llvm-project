@@ -1,0 +1,86 @@
+name: LLVM YARPGen differential correctness
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-yarpgen-differential.yml
+      - .github/scripts/run-yarpgen-differential.sh
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the LLVM correctness tools artifact
+        required: true
+        default: "29670148807"
+      yarpgen_run_id:
+        description: Workflow run containing the YARPGen artifact
+        required: true
+        default: "29671159853"
+      start_seed:
+        description: First seed before shard offsets
+        required: true
+        default: "200000"
+      cases_per_shard:
+        description: Number of generated programs per shard
+        required: true
+        default: "100"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29670148807' }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: yarpgen-generator
+          path: artifacts/yarpgen
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.yarpgen_run_id || '29671159853' }}
+
+      - name: Extract tools
+        run: |
+          mkdir -p tools/llvm tools/yarpgen
+          tar -xzf artifacts/llvm/llvm-correctness-tools.tar.gz -C tools/llvm
+          tar -xzf artifacts/yarpgen/yarpgen-generator.tar.gz -C tools/yarpgen
+          chmod +x tools/llvm/bin/* tools/yarpgen/bin/yarpgen
+
+      - name: Run differential lane
+        env:
+          BASE_SEED: ${{ inputs.start_seed || '200000' }}
+          CASES_PER_SHARD: ${{ inputs.cases_per_shard || '100' }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          start_seed=$((BASE_SEED + SHARD * CASES_PER_SHARD))
+          bash .github/scripts/run-yarpgen-differential.sh \
+            "$PWD/tools/llvm" \
+            "$PWD/tools/yarpgen" \
+            "$start_seed" \
+            "$CASES_PER_SHARD" \
+            "$PWD/results"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: yarpgen-results-${{ matrix.shard }}
+          path: results
+          retention-days: 1
