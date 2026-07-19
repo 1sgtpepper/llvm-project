@@ -1,0 +1,56 @@
+name: AArch64 runtime validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - lfi-validation
+    paths:
+      - .github/workflows/aarch64-runtime-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build
+
+      - name: Fetch pinned sources
+        run: |
+          git clone --filter=blob:none https://github.com/lfi-project/lfi-runtime.git runtime
+          git -C runtime checkout a277d31e01ccf6967e930d3288cc2d5fa7feada1
+          sed -i 's/revision = master/revision = be3951fbc363a5523d0e755129ac566200cd2754/' runtime/subprojects/lfi-verifier.wrap
+          (cd runtime && meson subprojects download lfi-verifier)
+          sed -i 's/revision = ldxr-fix/revision = 76098eb3caaf713574aa79ff0aeece349e51ab1e/' runtime/subprojects/lfi-verifier/subprojects/disarm.wrap
+
+      - name: Configure validation
+        env:
+          VALIDATION_SOURCE: ${{ secrets.AARCH64_VALIDATION_SOURCE }}
+        run: |
+          test -n "$VALIDATION_SOURCE"
+          printf '%s' "$VALIDATION_SOURCE" > runtime/core/test/private_validation.c
+          unset VALIDATION_SOURCE
+          cat >> runtime/core/test/meson.build <<'EOF'
+
+          private_validation = executable(
+            'private-validation.elf',
+            'private_validation.c',
+            c_args: defines,
+            dependencies: [lfi_core],
+          )
+          test('private-validation', private_validation, suite: ['core'])
+          EOF
+          meson setup runtime/build runtime \
+            -Denable_linux=false \
+            -Denable_sbox=false \
+            -Denable_examples=false
+
+      - name: Run validation
+        run: |
+          meson test -C runtime/build private-validation --print-errorlogs
