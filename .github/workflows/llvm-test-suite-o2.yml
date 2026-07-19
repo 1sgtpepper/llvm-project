@@ -1,0 +1,103 @@
+name: LLVM test-suite O2 correctness
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the LLVM correctness tools artifact
+        required: true
+        default: "29673050071"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  single-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-test-suite
+          ref: 3396731658fc485536a2aa690b5eff7b3087df0b
+          path: test-suite
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29673050071' }}
+
+      - name: Extract compiler
+        run: |
+          mkdir -p tools/llvm results
+          tar -xzf artifacts/llvm/llvm-correctness-tools.tar.gz -C tools/llvm
+          chmod +x tools/llvm/bin/*
+          ln -s clang tools/llvm/bin/clang++
+          tools/llvm/bin/clang --version | tee results/clang-version.txt
+          git -C test-suite rev-parse HEAD | tee results/test-suite-revision.txt
+
+      - name: Configure SingleSource at O2
+        id: configure
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cmake -S test-suite -B test-suite-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$PWD/tools/llvm/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$PWD/tools/llvm/bin/clang++" \
+            -DCMAKE_C_FLAGS_RELEASE=-O2 \
+            -DCMAKE_CXX_FLAGS_RELEASE=-O2 \
+            -DTEST_SUITE_SUBDIRS=SingleSource \
+            -DTEST_SUITE_COLLECT_CODE_SIZE=OFF \
+            2>&1 | tee results/configure.log
+
+      - name: Build SingleSource
+        id: build
+        if: steps.configure.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cmake --build test-suite-build -- -j4 2>&1 | tee results/build.log
+
+      - name: Execute SingleSource
+        id: execute
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python3 llvm/utils/lit/lit.py -sv test-suite-build 2>&1 | tee results/lit.log
+
+      - name: Record outcome
+        if: always()
+        run: |
+          cat > results/summary.txt <<EOF
+          configure=${{ steps.configure.outcome }}
+          build=${{ steps.build.outcome }}
+          execute=${{ steps.execute.outcome }}
+          llvm_revision=$(cat tools/llvm/revision.txt)
+          test_suite_revision=$(cat results/test-suite-revision.txt)
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llvm-test-suite-o2-results
+          path: results
+          retention-days: 1
+
+      - name: Enforce successful suite
+        if: always()
+        env:
+          CONFIGURE_OUTCOME: ${{ steps.configure.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          EXECUTE_OUTCOME: ${{ steps.execute.outcome }}
+        run: |
+          test "$CONFIGURE_OUTCOME" = success
+          test "$BUILD_OUTCOME" = success
+          test "$EXECUTE_OUTCOME" = success
