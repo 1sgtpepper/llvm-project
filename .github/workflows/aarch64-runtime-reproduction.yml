@@ -15,7 +15,19 @@ on:
       source_run_id:
         description: YARPGen differential run containing the retained source
         required: true
-        default: "29682054046"
+        default: "29682906142"
+      source_artifact_name:
+        description: Artifact containing the retained source
+        required: true
+        default: yarpgen-aarch64-oracle-results-1
+      expected_seed:
+        description: Retained YARPGen seed
+        required: true
+        default: "402086"
+      expected_output:
+        description: Six-oracle consensus output
+        required: true
+        default: "14103497370531065056"
 
 permissions:
   actions: read
@@ -51,11 +63,11 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: yarpgen-aarch64-oracle-results-2
+          name: ${{ inputs.source_artifact_name || 'yarpgen-aarch64-oracle-results-1' }}
           path: artifacts/source
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run_id || '29682054046' }}
+          run-id: ${{ inputs.source_run_id || '29682906142' }}
 
       - name: Verify immutable inputs
         shell: bash
@@ -69,7 +81,8 @@ jobs:
           tar -xzf artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz \
             -C tools/llvm
           chmod +x tools/llvm/bin/*
-          test "$(sed -n 's/^seed=//p' artifacts/source/candidate/candidate.txt)" = 401717
+          test "$(sed -n 's/^seed=//p' artifacts/source/candidate/candidate.txt)" = \
+            "${{ inputs.expected_seed || '402086' }}"
           cp artifacts/source/candidate/{init.h,driver.cpp,func.cpp,candidate.txt} bundle/
           sha256sum bundle/{init.h,driver.cpp,func.cpp,candidate.txt} \
             | tee bundle/source-sha256.txt
@@ -78,7 +91,13 @@ jobs:
             printf 'llvm_artifact_run_id=%s\n' \
               "${{ inputs.llvm_run_id || '29679376309' }}"
             printf 'source_artifact_run_id=%s\n' \
-              "${{ inputs.source_run_id || '29682054046' }}"
+              "${{ inputs.source_run_id || '29682906142' }}"
+            printf 'source_artifact_name=%s\n' \
+              "${{ inputs.source_artifact_name || 'yarpgen-aarch64-oracle-results-1' }}"
+            printf 'expected_seed=%s\n' \
+              "${{ inputs.expected_seed || '402086' }}"
+            printf 'expected_output=%s\n' \
+              "${{ inputs.expected_output || '14103497370531065056' }}"
             tools/llvm/bin/clang --version | head -n1
             aarch64-linux-gnu-g++ --version | head -n1
             qemu-aarch64 --version | head -n1
@@ -114,7 +133,7 @@ jobs:
         shell: bash
         run: |
           set -u
-          expected=16859487666159312926
+          expected=${{ inputs.expected_output || '14103497370531065056' }}
           failed=0
           for binary in gcc-o0 gcc-o2 clang-o0 clang-o1 clang-o2 clang-o3; do
             /usr/bin/time -f '%e' -o "bundle/results/qemu-$binary.seconds" \
@@ -166,7 +185,7 @@ jobs:
           set -euo pipefail
           sha256sum -c bundle/binary-sha256.txt
           chmod +x bundle/gcc-o0 bundle/gcc-o2 bundle/clang-o{0,1,2,3}
-          expected=16859487666159312926
+          expected=${{ inputs.expected_output || '14103497370531065056' }}
           uname -a | tee bundle/results/native-provenance.txt
           for binary in gcc-o0 gcc-o2 clang-o0 clang-o1 clang-o2 clang-o3; do
             /usr/bin/time -f '%e' -o "bundle/results/native-$binary.seconds" \
