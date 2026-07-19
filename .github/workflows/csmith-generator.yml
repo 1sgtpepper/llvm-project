@@ -1,6 +1,11 @@
 name: Csmith generator
 
 on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/csmith-generator.yml
   workflow_dispatch:
 
 permissions:
