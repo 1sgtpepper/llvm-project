@@ -1,0 +1,67 @@
+name: LLVM SCEV casted recurrence correctness
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-scev-cast-addrec-check.yml
+      - .github/scripts/scev-cast-addrec.c
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the LLVM correctness tools artifact
+        required: true
+        default: "29673050071"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        attempt: [1, 2]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29673050071' }}
+
+      - name: Extract compiler
+        run: |
+          mkdir -p tools/llvm results
+          tar -xzf artifacts/llvm/llvm-correctness-tools.tar.gz -C tools/llvm
+          chmod +x tools/llvm/bin/*
+
+      - name: Compile and execute exhaustive matrix
+        run: |
+          tools/llvm/bin/clang -std=c11 -O2 \
+            .github/scripts/scev-cast-addrec.c -o results/check
+          timeout 30 results/check
+          tools/llvm/bin/clang -std=c11 -O2 -S -emit-llvm \
+            .github/scripts/scev-cast-addrec.c -o results/check.ll
+          sed -n '/define internal.*opt_unsigned_scan/,/^}/p' \
+            results/check.ll > results/unsigned.ll
+          sed -n '/define internal.*opt_signed_scan/,/^}/p' \
+            results/check.ll > results/signed.ll
+          grep -q 'phi i64' results/unsigned.ll
+          grep -q 'phi i64' results/signed.ll
+          tools/llvm/bin/clang --version | tee results/clang-version.txt
+          cat tools/llvm/revision.txt | tee results/llvm-revision.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scev-cast-addrec-results-${{ matrix.attempt }}
+          path: results
+          retention-days: 1
