@@ -21,9 +21,16 @@ env:
   TEST_SUITE_REVISION: 3396731658fc485536a2aa690b5eff7b3087df0b
 
 jobs:
-  single-source:
+  test-suite:
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - SingleSource
+          - MultiSource
+    name: ${{ matrix.suite }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
@@ -106,7 +113,7 @@ jobs:
             qemu-aarch64 --version | head -n1
           } | tee results/provenance.txt
 
-      - name: Configure AArch64 SingleSource at O2
+      - name: Configure AArch64 ${{ matrix.suite }} at O2
         id: configure
         continue-on-error: true
         shell: bash
@@ -121,13 +128,13 @@ jobs:
             -DCMAKE_C_FLAGS_RELEASE='-O2 --gcc-toolchain=/usr' \
             -DCMAKE_CXX_FLAGS_RELEASE='-O2 --gcc-toolchain=/usr' \
             -DCMAKE_EXE_LINKER_FLAGS=-static \
-            -DTEST_SUITE_SUBDIRS=SingleSource \
+            -DTEST_SUITE_SUBDIRS=${{ matrix.suite }} \
             -DTEST_SUITE_RUN_UNDER=qemu-aarch64 \
             -DTEST_SUITE_USER_MODE_EMULATION=ON \
             -DTEST_SUITE_COLLECT_CODE_SIZE=OFF \
             2>&1 | tee results/configure.log
 
-      - name: Build AArch64 SingleSource
+      - name: Build AArch64 ${{ matrix.suite }}
         id: build
         if: steps.configure.outcome == 'success'
         continue-on-error: true
@@ -137,7 +144,7 @@ jobs:
           cmake --build test-suite-build -- -j4 \
             2>&1 | tee results/build.log
 
-      - name: Execute AArch64 SingleSource
+      - name: Execute AArch64 ${{ matrix.suite }}
         id: execute
         if: steps.build.outcome == 'success'
         continue-on-error: true
@@ -155,6 +162,7 @@ jobs:
           configure=${{ steps.configure.outcome }}
           build=${{ steps.build.outcome }}
           execute=${{ steps.execute.outcome }}
+          suite=${{ matrix.suite }}
           llvm_revision=$(sed -n 's/^llvm_source_revision=//p' tools/llvm/provenance.txt)
           test_suite_revision=$(git -C test-suite rev-parse HEAD)
           EOF
@@ -162,7 +170,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: llvm-test-suite-aarch64-o2-results
+          name: llvm-test-suite-aarch64-o2-${{ matrix.suite }}-results
           path: results
           retention-days: 2
 
