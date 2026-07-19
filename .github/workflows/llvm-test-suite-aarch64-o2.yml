@@ -129,6 +129,7 @@ jobs:
             -DCMAKE_CXX_FLAGS_RELEASE='-O2 --gcc-toolchain=/usr' \
             -DCMAKE_EXE_LINKER_FLAGS=-static \
             -DTEST_SUITE_SUBDIRS=${{ matrix.suite }} \
+            -DTEST_SUITE_RUN_TYPE=test \
             -DTEST_SUITE_RUN_UNDER=qemu-aarch64 \
             -DTEST_SUITE_USER_MODE_EMULATION=ON \
             -DTEST_SUITE_COLLECT_CODE_SIZE=OFF \
@@ -151,7 +152,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          python3 llvm/utils/lit/lit.py -sv test-suite-build \
+          python3 llvm/utils/lit/lit.py -sv --timeout=300 test-suite-build \
             2>&1 | tee results/lit.log
 
       - name: Record outcome
@@ -163,6 +164,8 @@ jobs:
           build=${{ steps.build.outcome }}
           execute=${{ steps.execute.outcome }}
           suite=${{ matrix.suite }}
+          run_type=test
+          per_test_timeout_seconds=300
           llvm_revision=$(sed -n 's/^llvm_source_revision=//p' tools/llvm/provenance.txt)
           test_suite_revision=$(git -C test-suite rev-parse HEAD)
           EOF
