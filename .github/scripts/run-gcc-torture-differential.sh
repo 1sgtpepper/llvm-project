@@ -19,6 +19,7 @@ total_count=0
 compared_count=0
 o0_compile_fail_count=0
 baseline_runtime_fail_count=0
+directive_skip_count=0
 last_test=
 
 compile() {
@@ -41,6 +42,12 @@ while IFS= read -r source; do
   total_count=$((total_count + 1))
   last_test=${source#"$TEST_ROOT/"}
   rm -f "$RESULT_ROOT/work"/*
+
+  if grep -Eq 'dg-(skip-if|require-effective-target|options|additional-options|add-options|xfail-run-if|additional-sources)' \
+      "$source"; then
+    directive_skip_count=$((directive_skip_count + 1))
+    continue
+  fi
 
   if ! compile "$CLANG" -O0 "$source" "$RESULT_ROOT/work/clang-o0" \
       "$RESULT_ROOT/work/clang-o0.compile"; then
@@ -95,6 +102,7 @@ total_count=$total_count
 compared_count=$compared_count
 o0_compile_fail_count=$o0_compile_fail_count
 baseline_runtime_fail_count=$baseline_runtime_fail_count
+directive_skip_count=$directive_skip_count
 last_test=$last_test
 llvm_revision=$(cat "$LLVM_ROOT/revision.txt")
 clang_version=$(head -n 1 "$LLVM_ROOT/clang-version.txt")
