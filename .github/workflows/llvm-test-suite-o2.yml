@@ -1,6 +1,11 @@
 name: LLVM test-suite O2 correctness
 
 on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-test-suite-o2.yml
   workflow_dispatch:
     inputs:
       llvm_run_id:
