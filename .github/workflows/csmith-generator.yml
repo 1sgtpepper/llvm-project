@@ -11,28 +11,59 @@ on:
 permissions:
   contents: read
 
+env:
+  CSMITH_SOURCE_REVISION: 0cdc710315cfee9035e22ef4363ca479270d1934
+
 jobs:
   build-generator:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Fetch pinned Csmith
+        shell: bash
         run: |
+          set -euo pipefail
           git clone --filter=blob:none https://github.com/csmith-project/csmith.git csmith
-          git -C csmith checkout 0cdc710315cfee9035e22ef4363ca479270d1934
+          git -C csmith checkout "$CSMITH_SOURCE_REVISION"
+          test "$(git -C csmith rev-parse HEAD)" = "$CSMITH_SOURCE_REVISION"
+          test -z "$(git -C csmith status --porcelain)"
 
       - name: Build generator
+        shell: bash
         run: |
+          set -euo pipefail
           cmake -S csmith -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$PWD/install"
           cmake --build build --target install -- -j2
 
+      - name: Record generator provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'csmith_source_revision=%s\n' "$(git -C csmith rev-parse HEAD)"
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'runner_image=%s\n' "${ImageOS:-unknown}"
+            printf 'runner_image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'cmake_version=%s\n' "$(cmake --version | head -n1)"
+            printf 'ninja_version=%s\n' "$(ninja --version)"
+            printf 'generator_sha256=%s\n' \
+              "$(sha256sum install/bin/csmith | cut -d' ' -f1)"
+          } | tee install/provenance.txt
+
       - name: Package generator
-        run: tar -C install -czf csmith-generator.tar.gz bin include
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C install -czf csmith-generator.tar.gz bin include provenance.txt
+          sha256sum csmith-generator.tar.gz \
+            | tee csmith-generator.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: csmith-generator
-          path: csmith-generator.tar.gz
-          retention-days: 1
+          path: |
+            csmith-generator.tar.gz
+            csmith-generator.tar.gz.sha256
+          retention-days: 2

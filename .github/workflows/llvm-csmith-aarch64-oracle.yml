@@ -1,0 +1,142 @@
+name: LLVM AArch64 six-oracle differential
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the pinned AArch64 tools artifact
+        required: true
+        default: "29679376309"
+      csmith_run_id:
+        description: Workflow run containing the pinned Csmith artifact
+        required: true
+        default: "29670304821"
+      start_seed:
+        description: First seed before shard offsets
+        required: true
+        default: "300000"
+      cases_per_shard:
+        description: Number of generated programs per shard
+        required: true
+        default: "200"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install AArch64 execution oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            qemu-user
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-aarch64-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: csmith-generator
+          path: artifacts/csmith
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.csmith_run_id }}
+
+      - name: Verify and extract pinned tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools/llvm tools/csmith results
+          (
+            cd artifacts/llvm
+            sha256sum -c llvm-aarch64-correctness-tools.tar.gz.sha256
+          )
+          (
+            cd artifacts/csmith
+            sha256sum -c csmith-generator.tar.gz.sha256
+          )
+          cp artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz.sha256 \
+            results/
+          cp artifacts/csmith/csmith-generator.tar.gz.sha256 results/
+          tar -xzf artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz \
+            -C tools/llvm
+          tar -xzf artifacts/csmith/csmith-generator.tar.gz -C tools/csmith
+          chmod +x tools/llvm/bin/* tools/csmith/bin/csmith
+
+      - name: Verify compiler and emulator path
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#include <stdio.h>\nint main(void) { puts("aarch64-ok"); }\n' \
+            > smoke.c
+          tools/llvm/bin/clang --target=aarch64-linux-gnu \
+            --gcc-toolchain=/usr -O2 -c smoke.c -o smoke.o
+          aarch64-linux-gnu-gcc -static smoke.o -o smoke
+          test "$(qemu-aarch64 ./smoke)" = aarch64-ok
+
+          tools/csmith/bin/csmith --seed 1 --no-packed-struct \
+            --no-unions --no-bitfields --no-volatiles \
+            --max-funcs 1 --max-block-depth 2 --max-expr-complexity 5 \
+            --output smoke-csmith.c
+          csmith_include=$(find tools/csmith/include -name csmith.h \
+            -printf '%h\n' -quit)
+          tools/llvm/bin/clang --target=aarch64-linux-gnu \
+            --gcc-toolchain=/usr -O2 -I "$csmith_include" \
+            -c smoke-csmith.c -o smoke-csmith.o
+
+      - name: Record runner oracle provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            uname -a
+            dpkg-query -W \
+              gcc-aarch64-linux-gnu \
+              libc6-dev-arm64-cross \
+              qemu-user
+            gcc --version | head -n1
+            aarch64-linux-gnu-gcc --version | head -n1
+            qemu-aarch64 --version | head -n1
+          } | tee results/runner-provenance.txt
+
+      - name: Run six-oracle differential lane
+        env:
+          BASE_SEED: ${{ inputs.start_seed }}
+          CASES_PER_SHARD: ${{ inputs.cases_per_shard }}
+          SHARD: ${{ matrix.shard }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          start_seed=$((BASE_SEED + SHARD * CASES_PER_SHARD))
+          bash .github/scripts/run-csmith-aarch64-oracle.sh \
+            "$PWD/tools/llvm" \
+            "$PWD/tools/csmith" \
+            "$start_seed" \
+            "$CASES_PER_SHARD" \
+            "$PWD/results"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: csmith-aarch64-oracle-results-${{ matrix.shard }}
+          path: results
+          retention-days: 2
