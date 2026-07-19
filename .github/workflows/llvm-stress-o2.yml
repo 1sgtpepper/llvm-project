@@ -1,0 +1,72 @@
+name: LLVM optimizer stress correctness
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-stress-o2.yml
+      - .github/scripts/run-llvm-stress-o2.sh
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the LLVM correctness tools artifact
+        required: true
+        default: "29673050071"
+      start_seed:
+        description: First seed before shard offsets
+        required: true
+        default: "1"
+      cases_per_shard:
+        description: Number of generated modules per shard
+        required: true
+        default: "2500"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stress:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29673050071' }}
+
+      - name: Extract tools
+        run: |
+          mkdir -p tools/llvm
+          tar -xzf artifacts/llvm/llvm-correctness-tools.tar.gz -C tools/llvm
+          chmod +x tools/llvm/bin/*
+
+      - name: Run optimizer stress lane
+        env:
+          BASE_SEED: ${{ inputs.start_seed || '1' }}
+          CASES_PER_SHARD: ${{ inputs.cases_per_shard || '2500' }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          start_seed=$((BASE_SEED + SHARD * CASES_PER_SHARD))
+          bash .github/scripts/run-llvm-stress-o2.sh \
+            "$PWD/tools/llvm" \
+            "$start_seed" \
+            "$CASES_PER_SHARD" \
+            "$PWD/results"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: llvm-stress-results-${{ matrix.shard }}
+          path: results
+          retention-days: 1
