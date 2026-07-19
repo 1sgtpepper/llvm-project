@@ -17,7 +17,7 @@
 
 #define DEFINE_SIGNED(name, attr)                                            \
   attr static int8_t name(const uint8_t *a, int8_t k) {                      \
-    int8_t iv = INT8_MIN;                                                     \
+    int8_t iv = 0;                                                            \
     for (;;) {                                                                \
       if (a[(uint8_t)iv] == 0 || !(iv < k))                                  \
         return iv;                                                            \
