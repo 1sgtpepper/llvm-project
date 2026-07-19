@@ -11,31 +11,59 @@ on:
 permissions:
   contents: read
 
+env:
+  YARPGEN_SOURCE_REVISION: e0f63b6580cc9f1c50d18928a4273106dc3a6c41
+
 jobs:
   build-generator:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Checkout YARPGen
+      - name: Check out pinned YARPGen source
         uses: actions/checkout@v4
         with:
           repository: intel/yarpgen
           ref: e0f63b6580cc9f1c50d18928a4273106dc3a6c41
+          fetch-depth: 1
+
+      - name: Verify source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$YARPGEN_SOURCE_REVISION"
+          test -z "$(git status --porcelain)"
 
       - name: Build generator
+        shell: bash
         run: |
+          set -euo pipefail
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -- -j2
 
-      - name: Package generator
+      - name: Package generator with provenance
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p package/bin
           cp build/yarpgen package/bin/
-          printf '%s\n' e0f63b6580cc9f1c50d18928a4273106dc3a6c41 > package/revision.txt
+          {
+            printf 'yarpgen_source_revision=%s\n' "$(git rev-parse HEAD)"
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'runner_image=%s\n' "${ImageOS:-unknown}"
+            printf 'runner_image_version=%s\n' "${ImageVersion:-unknown}"
+            printf 'cmake_version=%s\n' "$(cmake --version | head -n1)"
+            printf 'ninja_version=%s\n' "$(ninja --version)"
+            printf 'generator_sha256=%s\n' \
+              "$(sha256sum package/bin/yarpgen | cut -d' ' -f1)"
+          } | tee package/provenance.txt
           tar -czf yarpgen-generator.tar.gz -C package .
+          sha256sum yarpgen-generator.tar.gz \
+            | tee yarpgen-generator.tar.gz.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: yarpgen-generator
-          path: yarpgen-generator.tar.gz
-          retention-days: 1
+          path: |
+            yarpgen-generator.tar.gz
+            yarpgen-generator.tar.gz.sha256
+          retention-days: 2

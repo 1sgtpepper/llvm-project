@@ -1,6 +1,14 @@
 name: LLVM AArch64 six-oracle differential
 
 on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-csmith-aarch64-oracle.yml
+      - .github/scripts/run-csmith-aarch64-oracle.sh
+      - .github/scripts/run-aarch64-directed-oracle.sh
+      - .github/scripts/aarch64-directed-oracle.c
   workflow_dispatch:
     inputs:
       llvm_run_id:
@@ -10,7 +18,7 @@ on:
       csmith_run_id:
         description: Workflow run containing the pinned Csmith artifact
         required: true
-        default: "29670304821"
+        default: "29679618544"
       start_seed:
         description: First seed before shard offsets
         required: true
@@ -34,6 +42,8 @@ jobs:
         shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
 
       - name: Install AArch64 execution oracle
         shell: bash
@@ -51,7 +61,7 @@ jobs:
           path: artifacts/llvm
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.llvm_run_id }}
+          run-id: ${{ inputs.llvm_run_id || '29679376309' }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -59,7 +69,7 @@ jobs:
           path: artifacts/csmith
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.csmith_run_id }}
+          run-id: ${{ inputs.csmith_run_id || '29679618544' }}
 
       - name: Verify and extract pinned tools
         shell: bash
@@ -108,6 +118,11 @@ jobs:
         run: |
           set -euo pipefail
           {
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'llvm_artifact_run_id=%s\n' \
+              "${{ inputs.llvm_run_id || '29679376309' }}"
+            printf 'csmith_artifact_run_id=%s\n' \
+              "${{ inputs.csmith_run_id || '29679618544' }}"
             uname -a
             dpkg-query -W \
               gcc-aarch64-linux-gnu \
@@ -118,10 +133,19 @@ jobs:
             qemu-aarch64 --version | head -n1
           } | tee results/runner-provenance.txt
 
+      - name: Run directed AArch64 boundary oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash .github/scripts/run-aarch64-directed-oracle.sh \
+            "$PWD/tools/llvm" \
+            "$PWD/.github/scripts/aarch64-directed-oracle.c" \
+            "$PWD/results"
+
       - name: Run six-oracle differential lane
         env:
-          BASE_SEED: ${{ inputs.start_seed }}
-          CASES_PER_SHARD: ${{ inputs.cases_per_shard }}
+          BASE_SEED: ${{ inputs.start_seed || '300000' }}
+          CASES_PER_SHARD: ${{ inputs.cases_per_shard || '200' }}
           SHARD: ${{ matrix.shard }}
         shell: bash
         run: |
