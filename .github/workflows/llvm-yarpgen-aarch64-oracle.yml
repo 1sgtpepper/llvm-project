@@ -1,0 +1,146 @@
+name: LLVM AArch64 YARPGen six-oracle differential
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/llvm-yarpgen-aarch64-oracle.yml
+      - .github/scripts/run-yarpgen-aarch64-oracle.sh
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the pinned AArch64 tools artifact
+        required: true
+        default: "29679376309"
+      yarpgen_run_id:
+        description: Workflow run containing the pinned YARPGen artifact
+        required: true
+        default: "29681634801"
+      start_seed:
+        description: First seed before shard offsets
+        required: true
+        default: "400000"
+      cases_per_shard:
+        description: Number of generated programs per shard
+        required: true
+        default: "75"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  differential:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+
+      - name: Install AArch64 C++ execution oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            qemu-user
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-aarch64-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29679376309' }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: yarpgen-generator
+          path: artifacts/yarpgen
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.yarpgen_run_id || '29681634801' }}
+
+      - name: Verify and extract pinned tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools/llvm tools/yarpgen results
+          (
+            cd artifacts/llvm
+            sha256sum -c llvm-aarch64-correctness-tools.tar.gz.sha256
+          )
+          (
+            cd artifacts/yarpgen
+            sha256sum -c yarpgen-generator.tar.gz.sha256
+          )
+          cp artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz.sha256 \
+            results/
+          cp artifacts/yarpgen/yarpgen-generator.tar.gz.sha256 results/
+          tar -xzf artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz \
+            -C tools/llvm
+          tar -xzf artifacts/yarpgen/yarpgen-generator.tar.gz \
+            -C tools/yarpgen
+          chmod +x tools/llvm/bin/* tools/yarpgen/bin/yarpgen
+
+      - name: Verify C++ compiler and emulator path
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '#include <iostream>\nint main() { std::cout << "aarch64-cxx-ok\\n"; }\n' \
+            > smoke.cpp
+          tools/llvm/bin/clang --driver-mode=g++ --target=aarch64-linux-gnu \
+            --gcc-toolchain=/usr -std=c++17 -O2 -c smoke.cpp -o smoke.o
+          aarch64-linux-gnu-g++ -static smoke.o -o smoke
+          test "$(qemu-aarch64 ./smoke)" = aarch64-cxx-ok
+
+      - name: Record runner oracle provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'llvm_artifact_run_id=%s\n' \
+              "${{ inputs.llvm_run_id || '29679376309' }}"
+            printf 'yarpgen_artifact_run_id=%s\n' \
+              "${{ inputs.yarpgen_run_id || '29681634801' }}"
+            uname -a
+            dpkg-query -W \
+              g++-aarch64-linux-gnu \
+              libc6-dev-arm64-cross \
+              qemu-user
+            g++ --version | head -n1
+            aarch64-linux-gnu-g++ --version | head -n1
+            qemu-aarch64 --version | head -n1
+          } | tee results/runner-provenance.txt
+
+      - name: Run YARPGen six-oracle differential lane
+        env:
+          BASE_SEED: ${{ inputs.start_seed || '400000' }}
+          CASES_PER_SHARD: ${{ inputs.cases_per_shard || '75' }}
+          SHARD: ${{ matrix.shard }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          start_seed=$((BASE_SEED + SHARD * CASES_PER_SHARD))
+          bash .github/scripts/run-yarpgen-aarch64-oracle.sh \
+            "$PWD/tools/llvm" \
+            "$PWD/tools/yarpgen" \
+            "$start_seed" \
+            "$CASES_PER_SHARD" \
+            "$PWD/results"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: yarpgen-aarch64-oracle-results-${{ matrix.shard }}
+          path: results
+          retention-days: 2
