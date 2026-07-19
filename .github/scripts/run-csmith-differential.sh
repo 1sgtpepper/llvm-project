@@ -26,7 +26,7 @@ compile() {
   local level=$2
   local output=$3
   local log=$4
-  timeout 20 "$compiler" -std=c11 -w -fno-strict-aliasing "$level" \
+  timeout 20 "$compiler" -std=c11 -w "$level" \
     -I "$CSMITH_INCLUDE" "$RESULT_ROOT/work/test.c" -o "$output" \
     >"$log" 2>&1
 }
