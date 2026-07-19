@@ -20,6 +20,11 @@ ulimit -c 0
 
 status=no-mismatch
 last_seed=$START_SEED
+generated_count=0
+compared_count=0
+generation_fail_count=0
+o0_compile_fail_count=0
+baseline_runtime_fail_count=0
 
 compile() {
   local compiler=$1
@@ -40,15 +45,19 @@ execute() {
 for ((offset = 0; offset < CASE_COUNT; offset++)); do
   seed=$((START_SEED + offset))
   last_seed=$seed
+  rm -f "$RESULT_ROOT/work"/*
 
   if ! timeout 10 "$CSMITH" --seed "$seed" --no-packed-struct \
       --max-funcs 5 --max-block-depth 5 --max-expr-complexity 20 \
       --output "$RESULT_ROOT/work/test.c"; then
+    generation_fail_count=$((generation_fail_count + 1))
     continue
   fi
+  generated_count=$((generated_count + 1))
 
   if ! compile "$CLANG" -O0 "$RESULT_ROOT/work/clang-o0" \
       "$RESULT_ROOT/work/clang-o0.compile"; then
+    o0_compile_fail_count=$((o0_compile_fail_count + 1))
     continue
   fi
 
@@ -56,13 +65,14 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
       "$RESULT_ROOT/work/clang-o2.compile"; then
     status=clang-o2-compile-failure
   elif ! execute "$RESULT_ROOT/work/clang-o0" "$RESULT_ROOT/work/clang-o0.out"; then
+    baseline_runtime_fail_count=$((baseline_runtime_fail_count + 1))
     continue
   elif ! execute "$RESULT_ROOT/work/clang-o2" "$RESULT_ROOT/work/clang-o2.out"; then
     status=clang-o2-runtime-failure
   elif ! cmp -s "$RESULT_ROOT/work/clang-o0.out" "$RESULT_ROOT/work/clang-o2.out"; then
     status=clang-o2-output-mismatch
   else
-    rm -f "$RESULT_ROOT/work"/*
+    compared_count=$((compared_count + 1))
     continue
   fi
 
@@ -86,13 +96,26 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
   break
 done
 
+if [[ "$status" == no-mismatch && "$compared_count" -eq 0 ]]; then
+  status=no-valid-cases
+fi
+
 cat >"$RESULT_ROOT/summary.txt" <<EOF
 status=$status
 start_seed=$START_SEED
 last_seed=$last_seed
 case_count=$CASE_COUNT
+generated_count=$generated_count
+compared_count=$compared_count
+generation_fail_count=$generation_fail_count
+o0_compile_fail_count=$o0_compile_fail_count
+baseline_runtime_fail_count=$baseline_runtime_fail_count
 llvm_revision=$(cat "$LLVM_ROOT/revision.txt")
 clang_version=$(head -n 1 "$LLVM_ROOT/clang-version.txt")
 EOF
 
 printf '%s\n' "$status"
+
+if [[ "$status" == no-valid-cases ]]; then
+  exit 2
+fi
