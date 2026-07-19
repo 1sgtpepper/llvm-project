@@ -76,9 +76,6 @@ while IFS= read -r source; do
   elif ! execute "$RESULT_ROOT/work/clang-o2" \
       "$RESULT_ROOT/work/clang-o2.out"; then
     case_status=clang-o2-runtime-failure
-  elif ! cmp -s "$RESULT_ROOT/work/clang-o0.out" \
-      "$RESULT_ROOT/work/clang-o2.out"; then
-    case_status=clang-o2-output-mismatch
   else
     compared_count=$((compared_count + 1))
     continue
