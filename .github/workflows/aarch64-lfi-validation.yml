@@ -1,0 +1,50 @@
+name: AArch64 LFI validation
+
+on:
+  push:
+    branches:
+      - lfi-validation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure
+        run: >
+          cmake -S llvm -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DLLVM_TARGETS_TO_BUILD=AArch64
+          -DLLVM_ENABLE_PROJECTS=
+          -DLLVM_INCLUDE_TESTS=OFF
+          -DLLVM_INCLUDE_BENCHMARKS=OFF
+          -DLLVM_INCLUDE_EXAMPLES=OFF
+          -DLLVM_ENABLE_TERMINFO=OFF
+          -DLLVM_ENABLE_ZLIB=OFF
+          -DLLVM_ENABLE_ZSTD=OFF
+
+      - name: Build focused tools
+        run: cmake --build build --target llvm-mc llvm-tblgen llc -- -j2
+
+      - name: Record revision
+        run: |
+          git rev-parse HEAD | tee build/revision.txt
+          build/bin/llvm-mc --version | tee build/llvm-mc-version.txt
+
+      - name: Package focused tools
+        run: |
+          tar -C build -czf aarch64-tools.tar.gz             bin/llvm-mc             bin/llvm-tblgen             bin/llc             revision.txt             llvm-mc-version.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aarch64-tools
+          path: aarch64-tools.tar.gz
+          retention-days: 1
