@@ -20,6 +20,9 @@ status=no-mismatch
 last_seed=$START_SEED
 generated_count=0
 compared_count=0
+generation_fail_count=0
+o0_compile_fail_count=0
+baseline_runtime_fail_count=0
 
 compile() {
   local compiler=$1
@@ -46,12 +49,14 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
   if ! timeout 20 "$YARPGEN" --seed="$seed" --std=c++ \
       --emit-align-attr=none --emit-pragmas=none \
       --out-dir="$RESULT_ROOT/work"; then
+    generation_fail_count=$((generation_fail_count + 1))
     continue
   fi
   generated_count=$((generated_count + 1))
 
   if ! compile "$CLANG" -O0 "$RESULT_ROOT/work/clang-o0" \
       "$RESULT_ROOT/work/clang-o0.compile" --driver-mode=g++; then
+    o0_compile_fail_count=$((o0_compile_fail_count + 1))
     continue
   fi
 
@@ -59,6 +64,7 @@ for ((offset = 0; offset < CASE_COUNT; offset++)); do
       "$RESULT_ROOT/work/clang-o2.compile" --driver-mode=g++; then
     status=clang-o2-compile-failure
   elif ! execute "$RESULT_ROOT/work/clang-o0" "$RESULT_ROOT/work/clang-o0.out"; then
+    baseline_runtime_fail_count=$((baseline_runtime_fail_count + 1))
     continue
   elif ! execute "$RESULT_ROOT/work/clang-o2" "$RESULT_ROOT/work/clang-o2.out"; then
     status=clang-o2-runtime-failure
@@ -104,6 +110,9 @@ last_seed=$last_seed
 case_count=$CASE_COUNT
 generated_count=$generated_count
 compared_count=$compared_count
+generation_fail_count=$generation_fail_count
+o0_compile_fail_count=$o0_compile_fail_count
+baseline_runtime_fail_count=$baseline_runtime_fail_count
 llvm_revision=$(cat "$LLVM_ROOT/revision.txt")
 clang_version=$(head -n 1 "$LLVM_ROOT/clang-version.txt")
 yarpgen_revision=$(cat "$YARPGEN_ROOT/revision.txt")
