@@ -1,0 +1,188 @@
+name: AArch64 runtime reproduction
+
+on:
+  push:
+    branches:
+      - correctness-validation
+    paths:
+      - .github/workflows/aarch64-runtime-reproduction.yml
+  workflow_dispatch:
+    inputs:
+      llvm_run_id:
+        description: Workflow run containing the pinned AArch64 tools artifact
+        required: true
+        default: "29679376309"
+      source_run_id:
+        description: YARPGen differential run containing the retained source
+        required: true
+        default: "29682054046"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build-and-qemu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/workflows/aarch64-runtime-reproduction.yml
+
+      - name: Install AArch64 build and execution environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross \
+            qemu-user \
+            time
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: llvm-aarch64-correctness-tools
+          path: artifacts/llvm
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.llvm_run_id || '29679376309' }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: yarpgen-aarch64-oracle-results-2
+          path: artifacts/source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id || '29682054046' }}
+
+      - name: Verify immutable inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools/llvm bundle/results
+          (
+            cd artifacts/llvm
+            sha256sum -c llvm-aarch64-correctness-tools.tar.gz.sha256
+          )
+          tar -xzf artifacts/llvm/llvm-aarch64-correctness-tools.tar.gz \
+            -C tools/llvm
+          chmod +x tools/llvm/bin/*
+          test "$(sed -n 's/^seed=//p' artifacts/source/candidate/candidate.txt)" = 401717
+          cp artifacts/source/candidate/{init.h,driver.cpp,func.cpp,candidate.txt} bundle/
+          sha256sum bundle/{init.h,driver.cpp,func.cpp,candidate.txt} \
+            | tee bundle/source-sha256.txt
+          {
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'llvm_artifact_run_id=%s\n' \
+              "${{ inputs.llvm_run_id || '29679376309' }}"
+            printf 'source_artifact_run_id=%s\n' \
+              "${{ inputs.source_run_id || '29682054046' }}"
+            tools/llvm/bin/clang --version | head -n1
+            aarch64-linux-gnu-g++ --version | head -n1
+            qemu-aarch64 --version | head -n1
+          } | tee bundle/provenance.txt
+
+      - name: Build independent and current-compiler binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          aarch64-linux-gnu-g++ -std=c++17 -w -O0 -static \
+            bundle/driver.cpp bundle/func.cpp -o bundle/gcc-o0
+          aarch64-linux-gnu-g++ -std=c++17 -w -O2 -static \
+            bundle/driver.cpp bundle/func.cpp -o bundle/gcc-o2
+          for level in 0 1 2 3; do
+            tools/llvm/bin/clang --driver-mode=g++ --target=aarch64-linux-gnu \
+              --gcc-toolchain=/usr -std=c++17 -w "-O$level" \
+              -c bundle/driver.cpp -o "bundle/clang-o${level}-driver.o"
+            tools/llvm/bin/clang --driver-mode=g++ --target=aarch64-linux-gnu \
+              --gcc-toolchain=/usr -std=c++17 -w "-O$level" \
+              -c bundle/func.cpp -o "bundle/clang-o${level}-func.o"
+            aarch64-linux-gnu-g++ -static \
+              "bundle/clang-o${level}-driver.o" \
+              "bundle/clang-o${level}-func.o" \
+              -o "bundle/clang-o$level"
+          done
+          file bundle/gcc-o0 bundle/gcc-o2 bundle/clang-o{0,1,2,3}
+          sha256sum bundle/gcc-o0 bundle/gcc-o2 bundle/clang-o{0,1,2,3} \
+            | tee bundle/binary-sha256.txt
+
+      - name: Time exact binaries under QEMU
+        id: qemu
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          expected=16859487666159312926
+          failed=0
+          for binary in gcc-o0 gcc-o2 clang-o0 clang-o1 clang-o2 clang-o3; do
+            /usr/bin/time -f '%e' -o "bundle/results/qemu-$binary.seconds" \
+              timeout 180 qemu-aarch64 "bundle/$binary" \
+              >"bundle/results/qemu-$binary.out" \
+              2>"bundle/results/qemu-$binary.err"
+            status=$?
+            printf '%s\n' "$status" >"bundle/results/qemu-$binary.status"
+            output=$(tr -d '\r\n' <"bundle/results/qemu-$binary.out")
+            printf '%s status=%s seconds=%s output=%s\n' \
+              "$binary" "$status" \
+              "$(cat "bundle/results/qemu-$binary.seconds")" "$output" \
+              | tee -a bundle/results/qemu-summary.txt
+            if [[ "$status" -ne 0 || "$output" != "$expected" || \
+                  -s "bundle/results/qemu-$binary.err" ]]; then
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aarch64-runtime-reproduction-binaries
+          path: bundle
+          retention-days: 2
+
+      - name: Enforce successful long-timeout QEMU reproduction
+        if: always()
+        env:
+          QEMU_OUTCOME: ${{ steps.qemu.outcome }}
+        shell: bash
+        run: test "$QEMU_OUTCOME" = success
+
+  native-arm64:
+    needs: build-and-qemu
+    if: always()
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aarch64-runtime-reproduction-binaries
+          path: bundle
+
+      - name: Verify and time identical binaries on native ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum -c bundle/binary-sha256.txt
+          expected=16859487666159312926
+          uname -a | tee bundle/results/native-provenance.txt
+          for binary in gcc-o0 gcc-o2 clang-o0 clang-o1 clang-o2 clang-o3; do
+            /usr/bin/time -f '%e' -o "bundle/results/native-$binary.seconds" \
+              timeout 180 "bundle/$binary" \
+              >"bundle/results/native-$binary.out" \
+              2>"bundle/results/native-$binary.err"
+            output=$(tr -d '\r\n' <"bundle/results/native-$binary.out")
+            test "$output" = "$expected"
+            test ! -s "bundle/results/native-$binary.err"
+            printf '%s status=0 seconds=%s output=%s\n' \
+              "$binary" "$(cat "bundle/results/native-$binary.seconds")" "$output" \
+              | tee -a bundle/results/native-summary.txt
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aarch64-runtime-reproduction-native-results
+          path: bundle/results
+          retention-days: 2
