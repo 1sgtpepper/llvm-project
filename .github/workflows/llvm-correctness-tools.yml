@@ -37,7 +37,7 @@ jobs:
         run: >
           cmake --build build
           --target clang opt lli llc llvm-stress llvm-reduce
-          -- -j2
+          -- -j4
 
       - name: Record revision
         run: |
@@ -46,7 +46,7 @@ jobs:
 
       - name: Package correctness tools
         run: |
-          tar -C build -czf llvm-correctness-tools.tar.gz \
+          tar -h -C build -czf llvm-correctness-tools.tar.gz \
             bin/clang \
             bin/opt \
             bin/lli \
