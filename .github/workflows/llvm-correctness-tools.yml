@@ -1,0 +1,62 @@
+name: LLVM correctness tools
+
+on:
+  push:
+    branches:
+      - correctness-validation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure
+        run: >
+          cmake -S llvm -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DLLVM_ENABLE_PROJECTS=clang
+          -DLLVM_TARGETS_TO_BUILD=X86
+          -DLLVM_INCLUDE_TESTS=OFF
+          -DLLVM_INCLUDE_BENCHMARKS=OFF
+          -DLLVM_INCLUDE_EXAMPLES=OFF
+          -DLLVM_ENABLE_TERMINFO=OFF
+          -DLLVM_ENABLE_ZLIB=OFF
+          -DLLVM_ENABLE_ZSTD=OFF
+
+      - name: Build correctness tools
+        run: >
+          cmake --build build
+          --target clang opt lli llc llvm-stress llvm-reduce
+          -- -j2
+
+      - name: Record revision
+        run: |
+          git rev-parse HEAD | tee build/revision.txt
+          build/bin/clang --version | tee build/clang-version.txt
+
+      - name: Package correctness tools
+        run: |
+          tar -C build -czf llvm-correctness-tools.tar.gz \
+            bin/clang \
+            bin/opt \
+            bin/lli \
+            bin/llc \
+            bin/llvm-stress \
+            bin/llvm-reduce \
+            lib/clang \
+            revision.txt \
+            clang-version.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llvm-correctness-tools
+          path: llvm-correctness-tools.tar.gz
+          retention-days: 1
