@@ -11,10 +11,11 @@ TEST_ROOT="$CORPUS_ROOT/gcc/testsuite/gcc.c-torture/execute"
 test -x "$CLANG"
 test -d "$TEST_ROOT"
 
-mkdir -p "$RESULT_ROOT/candidate" "$RESULT_ROOT/work"
+mkdir -p "$RESULT_ROOT/candidates" "$RESULT_ROOT/work"
 ulimit -c 0
 
 status=no-mismatch
+candidate_count=0
 total_count=0
 compared_count=0
 o0_compile_fail_count=0
@@ -68,35 +69,43 @@ while IFS= read -r source; do
     continue
   fi
 
+  case_status=no-mismatch
   if ! compile "$CLANG" -O2 "$source" "$RESULT_ROOT/work/clang-o2" \
       "$RESULT_ROOT/work/clang-o2.compile"; then
-    status=clang-o2-compile-failure
+    case_status=clang-o2-compile-failure
   elif ! execute "$RESULT_ROOT/work/clang-o2" \
       "$RESULT_ROOT/work/clang-o2.out"; then
-    status=clang-o2-runtime-failure
+    case_status=clang-o2-runtime-failure
   elif ! cmp -s "$RESULT_ROOT/work/clang-o0.out" \
       "$RESULT_ROOT/work/clang-o2.out"; then
-    status=clang-o2-output-mismatch
+    case_status=clang-o2-output-mismatch
   else
     compared_count=$((compared_count + 1))
     continue
   fi
 
-  cp "$source" "$RESULT_ROOT/candidate/test.c"
-  cp "$RESULT_ROOT/work"/*.out "$RESULT_ROOT/candidate/" 2>/dev/null || true
-  cp "$RESULT_ROOT/work"/*.compile "$RESULT_ROOT/candidate/" 2>/dev/null || true
-  printf '%s\n' "$last_test" >"$RESULT_ROOT/candidate/path.txt"
+  candidate_count=$((candidate_count + 1))
+  candidate_root="$RESULT_ROOT/candidates/$candidate_count"
+  mkdir -p "$candidate_root"
+  cp "$source" "$candidate_root/test.c"
+  cp "$RESULT_ROOT/work"/*.out "$candidate_root/" 2>/dev/null || true
+  cp "$RESULT_ROOT/work"/*.compile "$candidate_root/" 2>/dev/null || true
+  printf '%s\n' "$last_test" >"$candidate_root/path.txt"
+  printf '%s\n' "$case_status" >"$candidate_root/status.txt"
 
   if compile gcc -O0 "$source" "$RESULT_ROOT/work/gcc-o0" \
-      "$RESULT_ROOT/candidate/gcc-o0.compile" && \
+      "$candidate_root/gcc-o0.compile" && \
       compile gcc -O2 "$source" "$RESULT_ROOT/work/gcc-o2" \
-      "$RESULT_ROOT/candidate/gcc-o2.compile"; then
+      "$candidate_root/gcc-o2.compile"; then
     execute "$RESULT_ROOT/work/gcc-o0" \
-      "$RESULT_ROOT/candidate/gcc-o0.out" || true
+      "$candidate_root/gcc-o0.out" || true
     execute "$RESULT_ROOT/work/gcc-o2" \
-      "$RESULT_ROOT/candidate/gcc-o2.out" || true
+      "$candidate_root/gcc-o2.out" || true
   fi
-  break
+  status=signals-found
+  if [[ "$candidate_count" -ge 20 ]]; then
+    break
+  fi
 done < <(find "$TEST_ROOT" -maxdepth 1 -type f -name '*.c' -print | sort)
 
 if [[ "$status" == no-mismatch && "$compared_count" -eq 0 ]]; then
@@ -110,6 +119,7 @@ compared_count=$compared_count
 o0_compile_fail_count=$o0_compile_fail_count
 baseline_runtime_fail_count=$baseline_runtime_fail_count
 directive_skip_count=$directive_skip_count
+candidate_count=$candidate_count
 last_test=$last_test
 llvm_revision=$(cat "$LLVM_ROOT/revision.txt")
 clang_version=$(head -n 1 "$LLVM_ROOT/clang-version.txt")
