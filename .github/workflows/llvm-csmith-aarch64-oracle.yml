@@ -144,7 +144,7 @@ jobs:
 
       - name: Run six-oracle differential lane
         env:
-          BASE_SEED: ${{ inputs.start_seed || '300000' }}
+          BASE_SEED: ${{ inputs.start_seed || '303000' }}
           CASES_PER_SHARD: ${{ inputs.cases_per_shard || '200' }}
           SHARD: ${{ matrix.shard }}
         shell: bash

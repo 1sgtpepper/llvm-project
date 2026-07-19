@@ -124,7 +124,7 @@ jobs:
 
       - name: Run YARPGen six-oracle differential lane
         env:
-          BASE_SEED: ${{ inputs.start_seed || '400000' }}
+          BASE_SEED: ${{ inputs.start_seed || '402000' }}
           CASES_PER_SHARD: ${{ inputs.cases_per_shard || '75' }}
           SHARD: ${{ matrix.shard }}
         shell: bash
