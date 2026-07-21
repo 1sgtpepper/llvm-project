@@ -114,7 +114,7 @@ using DivSIOpLowering =
 using DivUIOpLowering =
     VectorConvertToLLVMPattern<arith::DivUIOp, LLVM::UDivOp>;
 using ExtFOpLowering = VectorConvertToLLVMPattern<arith::ExtFOp, LLVM::FPExtOp,
-                                                  AttrConvertPassThrough,
+                                                  arith::AttrConvertFastMathToLLVM,
                                                   /*FailOnUnsupportedFP=*/true>;
 using ExtSIOpLowering =
     VectorConvertToLLVMPattern<arith::ExtSIOp, LLVM::SExtOp>;
@@ -202,7 +202,7 @@ using SubIOpLowering =
 using TruncFOpLowering =
     ConstrainedVectorConvertToLLVMPattern<arith::TruncFOp, LLVM::FPTruncOp,
                                           /*HasRoundingMode=*/false,
-                                          AttrConvertPassThrough,
+                                          arith::AttrConvertFastMathToLLVM,
                                           /*FailOnUnsupportedFP=*/true>;
 using ConstrainedTruncFOpLowering = ConstrainedVectorConvertToLLVMPattern<
     arith::TruncFOp, LLVM::ConstrainedFPTruncIntr, /*HasRoundingMode=*/true,
