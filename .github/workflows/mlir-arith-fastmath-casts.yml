@@ -49,7 +49,7 @@ jobs:
             -DMLIR_INCLUDE_TESTS=ON
 
       - name: Build MLIR test tools
-        run: ninja -C build mlir-opt FileCheck not
+        run: ninja -C build mlir-opt FileCheck count not
 
       - name: Run targeted Arith-to-LLVM test
         run: |
