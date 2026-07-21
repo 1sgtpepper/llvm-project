@@ -12,7 +12,7 @@ permissions:
 jobs:
   mlir-lit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout LLVM
         uses: actions/checkout@v4
@@ -24,12 +24,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang lld ninja-build
 
+      - name: Setup sccache
+        uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce
+        with:
+          key: mlir-narrow-ubuntu-24.04
+          max-size: 5G
+          variant: sccache
+
       - name: Configure MLIR test build
         run: |
           cmake -S llvm -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=sccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=sccache \
             -DLLVM_USE_LINKER=lld \
             -DLLVM_ENABLE_PROJECTS=mlir \
             -DLLVM_TARGETS_TO_BUILD=host \
