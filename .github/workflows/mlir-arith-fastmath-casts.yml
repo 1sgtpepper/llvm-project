@@ -1,0 +1,48 @@
+name: MLIR Arith fast-math cast validation
+
+on:
+  push:
+    branches:
+      - ci/mlir-arith-fastmath-casts
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mlir-lit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout LLVM
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang lld ninja-build
+
+      - name: Configure MLIR test build
+        run: |
+          cmake -S llvm -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DLLVM_USE_LINKER=lld \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_TARGETS_TO_BUILD=host \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_TESTS=ON \
+            -DMLIR_INCLUDE_TESTS=ON
+
+      - name: Build MLIR test tools
+        run: ninja -C build mlir-opt FileCheck not
+
+      - name: Run targeted Arith-to-LLVM test
+        run: |
+          python3 build/bin/llvm-lit -sv \
+            mlir/test/Conversion/ArithToLLVM/arith-to-llvm.mlir
