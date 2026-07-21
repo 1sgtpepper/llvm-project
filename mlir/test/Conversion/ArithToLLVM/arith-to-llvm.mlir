@@ -866,7 +866,7 @@ func.func @ops_supporting_fastmath(%arg0: f32, %arg1: f32, %arg2: i32) {
   %0 = arith.addf %arg0, %arg1 fastmath<fast> : f32
 // CHECK: llvm.fdiv %arg0, %arg1  {fastmathFlags = #llvm.fastmath<fast>} : f32
   %1 = arith.divf %arg0, %arg1 fastmath<fast> : f32
-// CHECK: llvm.fpext %arg0 {fastmathFlags = #llvm.fastmath<fast>} : f32 to f64
+// CHECK: llvm.fpext %arg0 fastmath<fast> : f32 to f64
   %2 = arith.extf %arg0 fastmath<fast> : f32 to f64
 // CHECK: llvm.intr.maximum(%arg0, %arg1) {fastmathFlags = #llvm.fastmath<fast>} : (f32, f32) -> f32
   %3 = arith.maximumf %arg0, %arg1 fastmath<fast> : f32
@@ -880,7 +880,7 @@ func.func @ops_supporting_fastmath(%arg0: f32, %arg1: f32, %arg2: i32) {
   %7 = arith.remf %arg0, %arg1 fastmath<fast> : f32
 // CHECK: llvm.fsub %arg0, %arg1  {fastmathFlags = #llvm.fastmath<fast>} : f32
   %8 = arith.subf %arg0, %arg1 fastmath<fast> : f32
-// CHECK: llvm.fptrunc %arg0 {fastmathFlags = #llvm.fastmath<fast>} : f32 to f16
+// CHECK: llvm.fptrunc %arg0 fastmath<fast> : f32 to f16
   %9 = arith.truncf %arg0 fastmath<fast> : f32 to f16
   return
 }
