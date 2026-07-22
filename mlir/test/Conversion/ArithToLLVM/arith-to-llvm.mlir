@@ -866,18 +866,22 @@ func.func @ops_supporting_fastmath(%arg0: f32, %arg1: f32, %arg2: i32) {
   %0 = arith.addf %arg0, %arg1 fastmath<fast> : f32
 // CHECK: llvm.fdiv %arg0, %arg1  {fastmathFlags = #llvm.fastmath<fast>} : f32
   %1 = arith.divf %arg0, %arg1 fastmath<fast> : f32
+// CHECK: llvm.fpext %arg0 fastmath<fast> : f32 to f64
+  %2 = arith.extf %arg0 fastmath<fast> : f32 to f64
 // CHECK: llvm.intr.maximum(%arg0, %arg1) {fastmathFlags = #llvm.fastmath<fast>} : (f32, f32) -> f32
-  %2 = arith.maximumf %arg0, %arg1 fastmath<fast> : f32
+  %3 = arith.maximumf %arg0, %arg1 fastmath<fast> : f32
 // CHECK: llvm.intr.minimum(%arg0, %arg1) {fastmathFlags = #llvm.fastmath<fast>} : (f32, f32) -> f32
-  %3 = arith.minimumf %arg0, %arg1 fastmath<fast> : f32
+  %4 = arith.minimumf %arg0, %arg1 fastmath<fast> : f32
 // CHECK: llvm.fmul %arg0, %arg1  {fastmathFlags = #llvm.fastmath<fast>} : f32
-  %4 = arith.mulf %arg0, %arg1 fastmath<fast> : f32
+  %5 = arith.mulf %arg0, %arg1 fastmath<fast> : f32
 // CHECK: llvm.fneg %arg0  {fastmathFlags = #llvm.fastmath<fast>} : f32
-  %5 = arith.negf %arg0 fastmath<fast> : f32
+  %6 = arith.negf %arg0 fastmath<fast> : f32
 // CHECK: llvm.frem %arg0, %arg1  {fastmathFlags = #llvm.fastmath<fast>} : f32
-  %6 = arith.remf %arg0, %arg1 fastmath<fast> : f32
+  %7 = arith.remf %arg0, %arg1 fastmath<fast> : f32
 // CHECK: llvm.fsub %arg0, %arg1  {fastmathFlags = #llvm.fastmath<fast>} : f32
-  %7 = arith.subf %arg0, %arg1 fastmath<fast> : f32
+  %8 = arith.subf %arg0, %arg1 fastmath<fast> : f32
+// CHECK: llvm.fptrunc %arg0 fastmath<fast> : f32 to f16
+  %9 = arith.truncf %arg0 fastmath<fast> : f32 to f16
   return
 }
 
@@ -981,4 +985,3 @@ func.func @supported_fp_type(%arg0: f32, %arg1: vector<4xf32>, %arg2: vector<4x8
   %3 = arith.cmpf oeq, %arg0, %arg3 : f32
   return
 }
-
