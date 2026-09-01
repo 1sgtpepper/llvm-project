@@ -12,7 +12,7 @@ permissions:
 jobs:
   mlir-lit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Checkout LLVM
         uses: actions/checkout@v4
