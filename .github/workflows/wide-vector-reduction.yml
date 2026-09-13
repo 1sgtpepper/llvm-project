@@ -62,10 +62,11 @@ jobs:
       - name: Check successor-query lifetimes using the actual queue
         if: always() && steps.build.outcome == 'success'
         run: |
-          clang++ $(build/bin/llvm-config --cxxflags) -O3 -UNDEBUG -fuse-ld=lld \
+          fixture_cxxflags=$(build/bin/llvm-config --cxxflags)
+          fixture_ldflags=$(build/bin/llvm-config --ldflags --link-static --libs selectiondag x86codegen asmparser --system-libs)
+          clang++ $fixture_cxxflags -O3 -UNDEBUG -fuse-ld=lld \
             -DUSE_SUCCESSOR_CACHE .ci/successor-cache-check.cpp \
-            -o measurements/successor-cache-check \
-            $(build/bin/llvm-config --ldflags --link-static --libs selectiondag x86 asmparser --system-libs)
+            -o measurements/successor-cache-check $fixture_ldflags
           timeout --kill-after=5s 180s measurements/successor-cache-check \
             2>&1 | tee measurements/cache-paths.txt
       - name: Retain comparison compilers and evidence
