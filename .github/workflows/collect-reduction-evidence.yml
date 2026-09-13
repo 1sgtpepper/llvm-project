@@ -1,0 +1,47 @@
+name: Collect wide reduction diagnostics
+
+on:
+  push:
+    branches: [inspect-wide-vector-boundaries]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  collect:
+    if: github.repository == '1sgtpepper/llvm-project'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Recover the original diagnostic artifact
+        run: |
+          gh run download 34750720265 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-assertions-comparison --dir original
+          mkdir -p diagnostics
+          gh api repos/1sgtpepper/llvm-project/actions/runs/34750720265/artifacts \
+            --jq '.artifacts[] | {name,id,size_in_bytes,digest}' > diagnostics/artifact-source.json
+      - name: Collect records and diagnostics without the compiler binaries
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          source = Path('original')
+          for path in source.rglob('*'):
+              if path.is_file() and path.suffix in {'.txt', '.json', '.jsonl', '.stderr', '.usage', '.patch', '.sha256', '.csv'}:
+                  target = Path('diagnostics') / path.relative_to(source)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(path, target)
+          for path in sorted((source / 'boundaries').glob('wide-*-baseline.stderr')):
+              if path.stat().st_size:
+                  print(path.name)
+                  print('\n'.join(path.read_text(errors='replace').splitlines()[:24]))
+          PY
+      - name: Retain original measurement records
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wide-vector-reduction-assertions-metadata
+          path: diagnostics
+          retention-days: 14
