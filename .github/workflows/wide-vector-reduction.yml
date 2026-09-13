@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   validate:
@@ -30,15 +31,23 @@ jobs:
           ref: 0e48409311a1a3fcff7714c5e3adf4aab048771c
           fetch-depth: 3
           persist-credentials: false
-      - name: Record the exact source and recover the driver
+      - name: Recover the baseline and record provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p measurements
           cp -a "$RUNNER_TEMP/reduction-drivers/." .ci/
+          gh run download 34746063798 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-baseline-compiler --dir measurements/baseline
+          chmod +x measurements/baseline/llc
           git rev-parse HEAD > measurements/revision.txt
-      - name: Install build tools
+          uname -a > measurements/kernel.txt
+          lscpu > measurements/cpu.txt
+          free -h > measurements/memory.txt
+      - name: Install build and profiling tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ninja-build clang lld
+          sudo apt-get install -y ninja-build clang lld linux-tools-generic
       - name: Restore compiler cache
         uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03
         with:
@@ -56,23 +65,51 @@ jobs:
             -DLLVM_TARGETS_TO_BUILD='NVPTX;X86' \
             -DLLVM_PARALLEL_LINK_JOBS=1 -DLLVM_INCLUDE_BENCHMARKS=OFF
           cp build/CMakeCache.txt measurements/
-      - name: Build the matching libraries
+      - name: Build the exact candidate
         id: build
-        run: ninja -C build -j4 llc llvm-config
-      - name: Check successor-query lifetimes using the actual queue
+        run: |
+          ninja -C build -j4 llc
+          mkdir -p measurements/candidate
+          cp build/bin/llc measurements/candidate/llc
+          sha256sum measurements/{baseline,candidate}/llc > measurements/compiler.sha256
+      - name: Compare the issue and closest controls on the same host
         if: always() && steps.build.outcome == 'success'
         run: |
-          fixture_cxxflags=$(build/bin/llvm-config --cxxflags)
-          fixture_ldflags=$(build/bin/llvm-config --ldflags --link-static --libs selectiondag x86codegen asmparser --system-libs)
-          clang++ $fixture_cxxflags -O3 -UNDEBUG -fuse-ld=lld \
-            -DUSE_SUCCESSOR_CACHE .ci/successor-cache-check.cpp \
-            -o measurements/successor-cache-check $fixture_ldflags
-          timeout --kill-after=5s 180s measurements/successor-cache-check \
-            2>&1 | tee measurements/cache-paths.txt
-      - name: Retain comparison compilers and evidence
+          ulimit -c 0
+          ulimit -v 8388608
+          python3 .ci/wide-vector-reduction.py \
+            --compiler baseline measurements/baseline/llc \
+            --compiler candidate measurements/candidate/llc \
+            --output measurements/timing --widths 65536 \
+            --kinds ordered reassoc no-reduce load-reduce --repetitions 3 --timeout 180
+      - name: Measure ordinary small functions
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          ulimit -c 0
+          ulimit -v 8388608
+          python3 .ci/benchmark-small-functions.py \
+            --baseline measurements/baseline/llc --candidate measurements/candidate/llc \
+            --output measurements/small-functions
+      - name: Profile the remaining costs
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          perf_bin=$(find /usr/lib -type f -name perf | sort | tail -1)
+          for kind in ordered no-reduce; do
+            timeout --kill-after=5s 180s sudo "$perf_bin" record -e cpu-clock:u -F 99 \
+              --call-graph fp -o "measurements/$kind.perf.data" -- \
+              measurements/candidate/llc "measurements/timing/inputs/$kind-65536.ll" -o /dev/null -time-passes \
+              2> "measurements/$kind.perf-status.txt"
+            sudo "$perf_bin" report --stdio --no-children -g none \
+              -i "measurements/$kind.perf.data" > "measurements/$kind.perf.txt"
+          done
+          sudo chown -R "$(id -u):$(id -g)" measurements
+      - name: Retain focused comparison evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: successor-cache-lifecycle-evidence
-          path: measurements
+          name: wide-vector-reduction-focused-comparison
+          path: |
+            measurements
+            !measurements/baseline/llc
+            !measurements/candidate/llc
           retention-days: 14
