@@ -1948,11 +1948,10 @@ CalcNodeSethiUllmanNumber(const SUnit *SU, std::vector<unsigned> &SUNumbers) {
       if (Pred.isCtrl()) continue;  // ignore chain preds
       SUnit *PredSU = Pred.getSUnit();
       if (SUNumbers[PredSU->NodeNum] == 0) {
-#ifndef NDEBUG
-        // In debug mode, check that we don't have such element in the stack.
-        for (auto It : WorkList)
-          assert(It.SU != PredSU && "Trying to push an element twice?");
-#endif
+        // An acyclic path cannot contain more nodes than SUNumbers. Avoid
+        // scanning the worklist, which is quadratic for long paths.
+        assert(WorkList.size() < SUNumbers.size() &&
+               "Trying to push an element twice?");
         // Next time start processing this one starting from the next pred.
         Temp.PredsProcessed = P + 1;
         WorkList.push_back(PredSU);
