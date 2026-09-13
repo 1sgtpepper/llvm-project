@@ -1,0 +1,59 @@
+name: MLIR VectorToSCF allocation validation
+
+on:
+  push:
+    branches:
+      - validate-mlir-vector-transfer-alloca-scope
+
+permissions:
+  contents: read
+
+jobs:
+  vector-to-scf:
+    if: github.repository == '1sgtpepper/llvm-project'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - name: Checkout LLVM
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ninja-build clang lld
+
+      - name: Restore compiler cache
+        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.18
+        with:
+          key: mlir-vector-transfer-alloca-ubuntu-24.04
+          max-size: 2G
+
+      - name: Configure MLIR
+        run: |
+          cmake -G Ninja -S llvm -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DLLVM_USE_LINKER=lld \
+            -DLLVM_ENABLE_PROJECTS=mlir \
+            -DLLVM_TARGETS_TO_BUILD=Native \
+            -DLLVM_ENABLE_ASSERTIONS=ON \
+            -DLLVM_INCLUDE_TESTS=ON \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_BUILD_EXAMPLES=OFF \
+            -DMLIR_INCLUDE_INTEGRATION_TESTS=OFF \
+            -DLLVM_PARALLEL_LINK_JOBS=1
+
+      - name: Build focused MLIR tools
+        run: cmake --build build --parallel 2 --target mlir-opt FileCheck
+
+      - name: Run VectorToSCF tests
+        run: |
+          test -x build/bin/mlir-opt
+          test -x build/bin/FileCheck
+          test -x build/bin/llvm-lit
+          build/bin/llvm-lit -sv mlir/test/Conversion/VectorToSCF
