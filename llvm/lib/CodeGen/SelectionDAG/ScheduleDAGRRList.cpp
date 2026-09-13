@@ -1726,7 +1726,7 @@ protected:
 
   // A queued node's successors are already scheduled. Their heights remain
   // fixed until the node leaves the queue or its dependencies are updated.
-  DenseMap<unsigned, unsigned> ClosestSuccs;
+  DenseMap<const SUnit *, unsigned> ClosestSuccs;
 
   /// RegPressure - Tracking current reg pressure per register class.
   std::vector<unsigned> RegPressure;
@@ -1802,7 +1802,7 @@ public:
     if (I != std::prev(Queue.end()))
       std::swap(*I, Queue.back());
     Queue.pop_back();
-    ClosestSuccs.erase(SU->NodeNum);
+    ClosestSuccs.erase(SU);
     SU->NodeQueueId = 0;
   }
 
@@ -1887,7 +1887,7 @@ public:
     if (Queue.empty()) return nullptr;
 
     SUnit *V = popFromQueue(Queue, Picker, scheduleDAG);
-    ClosestSuccs.erase(V->NodeNum);
+    ClosestSuccs.erase(V);
     V->NodeQueueId = 0;
     return V;
   }
@@ -2015,7 +2015,7 @@ void RegReductionPQBase::addNode(const SUnit *SU) {
 }
 
 void RegReductionPQBase::updateNode(const SUnit *SU) {
-  ClosestSuccs.erase(SU->NodeNum);
+  ClosestSuccs.erase(SU);
   SethiUllmanNumbers[SU->NodeNum] = 0;
   CalcNodeSethiUllmanNumber(SU, SethiUllmanNumbers);
 }
@@ -2345,10 +2345,10 @@ static unsigned closestSucc(const SUnit *SU) {
 }
 
 unsigned RegReductionPQBase::getClosestSucc(const SUnit *SU) {
-  auto It = ClosestSuccs.find(SU->NodeNum);
+  auto It = ClosestSuccs.find(SU);
   if (It != ClosestSuccs.end())
     return It->second;
-  return ClosestSuccs.try_emplace(SU->NodeNum, closestSucc(SU)).first->second;
+  return ClosestSuccs.try_emplace(SU, closestSucc(SU)).first->second;
 }
 
 /// calcMaxScratches - Returns an cost estimate of the worse case requirement
