@@ -1,4 +1,4 @@
-name: Check successor cache key distributions
+name: Wide vector reduction investigation
 
 on:
   push:
@@ -6,12 +6,16 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  distributions:
+  validate:
     if: github.repository == '1sgtpepper/llvm-project'
     runs-on: ubuntu-24.04
-    timeout-minutes: 80
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
     env:
       CCACHE_SLOPPINESS: pch_defines,time_macros
     steps:
@@ -19,24 +23,41 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: .ci
-      - name: Preserve the actual-owner fixture
+      - name: Preserve the investigation drivers
         run: cp -a .ci "$RUNNER_TEMP/reduction-drivers"
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
+      - name: Check out the exact compiler change
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
-          ref: 4b74ad785e25e3d5628313b79ca621b332a619b8
-          fetch-depth: 5
+          ref: 7d1d12716cf580a80394f1f248788cb803bb19e1
+          fetch-depth: 6
           persist-credentials: false
-      - name: Install existing build tools
+      - name: Recover the baseline and record provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p measurements
+          cp -a "$RUNNER_TEMP/reduction-drivers/." .ci/
+          gh run download 34750720265 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-assertions-comparison --dir "$RUNNER_TEMP/previous-comparison"
+          mkdir -p measurements/baseline measurements/prior
+          cp "$RUNNER_TEMP/previous-comparison/baseline/llc" measurements/baseline/llc
+          cp "$RUNNER_TEMP/previous-comparison/candidate/llc" measurements/prior/llc
+          chmod +x measurements/{baseline,prior}/llc
+          git rev-parse HEAD > measurements/revision.txt
+          git diff 0d55d0bf81ce2e0d6d3c46b7835efb788bde634a -- llvm > measurements/compiler.patch
+          uname -a > measurements/kernel.txt
+          lscpu > measurements/cpu.txt
+          free -h > measurements/memory.txt
+      - name: Install build and profiling tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ninja-build clang lld
-          cp -a "$RUNNER_TEMP/reduction-drivers/." .ci/
+          sudo apt-get install -y ninja-build clang lld linux-tools-generic
       - name: Restore compiler cache
         uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03
         with:
           key: wide-vector-reduction-ubuntu-24.04
           max-size: 4G
-      - name: Recover matching libraries through the compiler cache
+      - name: Configure with the baseline compiler options
         run: |
           cmake -G Ninja -S llvm -B build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -47,39 +68,141 @@ jobs:
             -DLLVM_USE_LINKER=lld -DLLVM_ENABLE_ASSERTIONS=ON \
             -DLLVM_TARGETS_TO_BUILD='NVPTX;X86' \
             -DLLVM_PARALLEL_LINK_JOBS=1 -DLLVM_INCLUDE_BENCHMARKS=OFF
-          ninja -C build -j4 llvm-config LLVMSelectionDAG LLVMX86CodeGen LLVMAsmParser
-      - name: Compare identical valid graphs with both exact queue implementations
-        run: |
-          mkdir -p measurements
-          lscpu > measurements/cpu.txt
           cp build/CMakeCache.txt measurements/
-          owner=llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
-          trap 'git restore "$owner"' EXIT
+      - name: Build the exact candidate and focused test tools
+        id: build
+        run: |
+          ninja -C build -j4 llc opt FileCheck llvm-as llvm-dis llvm-config count not split-file llvm-mc llvm-objdump llvm-readobj
+          mkdir -p measurements/candidate
+          cp build/bin/llc measurements/candidate/llc
+          sha256sum measurements/{baseline,prior,candidate}/llc > measurements/compiler.sha256
+      - name: Check successor-query lifetimes using the actual queue
+        if: always() && steps.build.outcome == 'success'
+        run: |
           fixture_cxxflags=$(build/bin/llvm-config --cxxflags)
           fixture_ldflags=$(build/bin/llvm-config --ldflags --link-static --libs selectiondag x86codegen asmparser --system-libs)
-          for label in pointer number; do
-            if [ "$label" = pointer ]; then
-              git show 7d21bcb2e0ef88bcb682430023bce7540bd9763b:"$owner" > "$owner"
-            else
-              git restore "$owner"
-            fi
-            git hash-object "$owner" > "measurements/$label-source.sha1"
-            clang++ $fixture_cxxflags -O3 -UNDEBUG -fuse-ld=lld \
-              .ci/successor-cache-strides.cpp -o "measurements/$label-strides" $fixture_ldflags
-            sha256sum "measurements/$label-strides" > "measurements/$label-binary.sha256"
-            ulimit -c 0
-            ulimit -v 8388608
-            timeout --kill-after=5s 180s "measurements/$label-strides" \
-              > "measurements/$label.csv" 2> "measurements/$label.stderr"
-            cat "measurements/$label.csv"
+          clang++ $fixture_cxxflags -O3 -UNDEBUG -fuse-ld=lld \
+            -DUSE_SUCCESSOR_CACHE .ci/successor-cache-check.cpp \
+            -o measurements/successor-cache-check $fixture_ldflags
+          timeout --kill-after=5s 180s measurements/successor-cache-check \
+            2>&1 | tee measurements/cache-paths.txt
+      - name: Check target regressions with both compilers
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          tests=(
+            llvm/test/CodeGen/NVPTX
+            llvm/test/CodeGen/X86/scheduler-backtracking.ll
+            llvm/test/CodeGen/X86/rrlist-livereg-corrutpion.ll
+            llvm/test/CodeGen/X86/2011-06-14-PreschedRegalias.ll
+            llvm/test/CodeGen/X86/inlineasm-sched-bug.ll
+            llvm/test/CodeGen/X86/atomic-dagsched.ll
+            llvm/test/CodeGen/X86/callbr-asm-instr-scheduling.ll
+            llvm/test/CodeGen/X86/atom-sched.ll
+            llvm/test/CodeGen/X86/insertps-unfold-load-bug.ll
+            llvm/test/CodeGen/X86/avx512-broadcast-unfold.ll
+          )
+          for label in baseline candidate; do
+            compiler=$(realpath "measurements/$label/llc")
+            build/bin/llvm-lit -j4 -v -D "llc=$compiler" "${tests[@]}" \
+              > "measurements/$label-regressions.txt" 2>&1 || {
+                cat "measurements/$label-regressions.txt"
+                exit 1
+              }
+            tail -15 "measurements/$label-regressions.txt"
           done
-      - name: Retain distribution evidence
+      - name: Compare complete compilation on the same host
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          ulimit -c 0
+          ulimit -v 8388608
+          python3 .ci/wide-vector-reduction.py \
+            --compiler baseline measurements/baseline/llc \
+            --compiler candidate measurements/candidate/llc --output measurements/timing \
+            --widths 65536 \
+            --kinds ordered no-reduce --repetitions 3 --timeout 180
+      - name: Check fixed-vector, floating-point and scheduler boundaries
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          ulimit -c 0
+          ulimit -v 8388608
+          python3 .ci/check-reduction-boundaries.py \
+            --baseline measurements/baseline/llc --candidate measurements/candidate/llc \
+            --output measurements/boundaries --wide-widths 65536
+      - name: Measure ordinary small functions
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          ulimit -c 0
+          ulimit -v 8388608
+          python3 .ci/benchmark-small-functions.py \
+            --baseline measurements/baseline/llc --candidate measurements/candidate/llc \
+            --output measurements/small-functions
+      - name: Profile the remaining assertion-enabled costs
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          perf_bin=$(find /usr/lib -type f -name perf | sort | tail -1)
+          for kind in ordered no-reduce; do
+            timeout --kill-after=5s 180s sudo "$perf_bin" record -e cpu-clock:u -F 99 \
+              --call-graph fp -o "measurements/$kind.perf.data" -- \
+              measurements/candidate/llc "measurements/timing/inputs/$kind-65536.ll" -o /dev/null -time-passes \
+              2> "measurements/$kind.perf-status.txt"
+            sudo "$perf_bin" report --stdio --no-children -g none \
+              -i "measurements/$kind.perf.data" > "measurements/$kind.perf.txt"
+          done
+          sudo chown -R "$(id -u):$(id -g)" measurements
+      - name: Verify every queried cache value in a separate diagnostic build
+        if: always() && steps.build.outcome == 'success'
+        run: |
+          owner=llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
+          trap 'git restore "$owner"' EXIT
+          python3 .ci/verify-successor-cache.py "$owner"
+          git diff -- "$owner" > measurements/cache-verifier.patch
+          ninja -C build -j4 llc
+          sha256sum build/bin/llc > measurements/cache-verifier.sha256
+          build/bin/llvm-lit -j4 -v \
+            llvm/test/CodeGen/NVPTX \
+            llvm/test/CodeGen/X86/scheduler-backtracking.ll \
+            llvm/test/CodeGen/X86/rrlist-livereg-corrutpion.ll \
+            llvm/test/CodeGen/X86/2011-06-14-PreschedRegalias.ll \
+            llvm/test/CodeGen/X86/inlineasm-sched-bug.ll \
+            llvm/test/CodeGen/X86/atomic-dagsched.ll \
+            llvm/test/CodeGen/X86/callbr-asm-instr-scheduling.ll \
+            llvm/test/CodeGen/X86/atom-sched.ll \
+            llvm/test/CodeGen/X86/insertps-unfold-load-bug.ll \
+            llvm/test/CodeGen/X86/avx512-broadcast-unfold.ll \
+            > measurements/cache-verifier-regressions.txt 2>&1 || {
+              cat measurements/cache-verifier-regressions.txt
+              exit 1
+            }
+          tail -15 measurements/cache-verifier-regressions.txt
+          for mode in source list-burr list-hybrid list-ilp; do
+            for input in scheduler-backtracking rrlist-livereg-corrutpion; do
+              build/bin/llc "llvm/test/CodeGen/X86/$input.ll" \
+                -mtriple=x86_64-- -pre-RA-sched="$mode" -o /dev/null \
+                -stats -stats-json 2> "measurements/cache-verifier-$input-$mode.json"
+              cat "measurements/cache-verifier-$input-$mode.json"
+            done
+          done
+      - name: Retain the pristine candidate compiler
+        if: always() && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wide-vector-reduction-selected-compiler
+          path: |
+            measurements/candidate/llc
+            measurements/revision.txt
+            measurements/compiler.sha256
+            measurements/compiler.patch
+            measurements/CMakeCache.txt
+          retention-days: 14
+      - name: Retain comparison evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: successor-cache-distributions
+          name: wide-vector-reduction-selected-evidence
           path: |
             measurements
-            !measurements/pointer-strides
-            !measurements/number-strides
+            !measurements/baseline/llc
+            !measurements/prior/llc
+            !measurements/candidate/llc
+            !measurements/successor-cache-check
           retention-days: 14
