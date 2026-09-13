@@ -30,6 +30,7 @@ def main():
     p.add_argument('--baseline', required=True)
     p.add_argument('--candidate', required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--wide-widths', type=int, nargs='*', default=[65535, 65536, 65537])
     args = p.parse_args()
     out = args.output
     out.mkdir(parents=True, exist_ok=True)
@@ -113,7 +114,7 @@ def main():
     wide = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(wide)
     for width, kind, (target, flags) in itertools.product(
-            [65535, 65536, 65537], ['ordered', 'reassoc'], settings):
+            args.wide_widths, ['ordered', 'reassoc'], settings):
         compare(f'wide-{width}-{kind}-{target}', wide.module(width, kind), flags)
 
     records.close()
