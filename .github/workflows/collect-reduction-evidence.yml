@@ -18,10 +18,10 @@ jobs:
     steps:
       - name: Recover the original diagnostic artifact
         run: |
-          gh run download 34750720265 --repo 1sgtpepper/llvm-project \
-            --name wide-vector-reduction-assertions-comparison --dir original
+          gh run download 34750869806 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-release-comparison --dir original
           mkdir -p diagnostics
-          gh api repos/1sgtpepper/llvm-project/actions/runs/34750720265/artifacts \
+          gh api repos/1sgtpepper/llvm-project/actions/runs/34750869806/artifacts \
             --jq '.artifacts[] | {name,id,size_in_bytes,digest}' > diagnostics/artifact-source.json
       - name: Collect records and diagnostics without the compiler binaries
         run: |
@@ -42,6 +42,6 @@ jobs:
       - name: Retain original measurement records
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: wide-vector-reduction-assertions-metadata
+          name: wide-vector-reduction-release-metadata
           path: diagnostics
           retention-days: 14
