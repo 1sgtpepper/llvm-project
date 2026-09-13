@@ -7,7 +7,6 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
-#include <chrono>
 #include <iostream>
 
 static void require(bool V, const char *Message) {
@@ -35,6 +34,7 @@ struct Fixture {
                                                CodeGenOptLevel::Default)) {
     // ScheduleDAGRRList owns and deletes the queue.
     Queue.setScheduleDAG(DAG.get());
+    DAG->BB = &MF.front();
     Nodes.reserve(Count);
     for (unsigned I = 0; I < Count; ++I)
       Nodes.emplace_back(static_cast<SDNode *>(nullptr), I);
@@ -199,5 +199,6 @@ int main() {
   MachineModuleInfo MMI(TM.get());
   auto *Fn = M->getFunction("f");
   MachineFunction MF(*Fn, *TM, *TM->getSubtargetImpl(*Fn), MMI.getContext(), 0);
+  MF.push_back(MF.CreateMachineBasicBlock());
   cases(MF);
 }
