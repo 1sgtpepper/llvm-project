@@ -6,68 +6,44 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   profile:
     if: github.repository == '1sgtpepper/llvm-project'
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
           persist-credentials: false
-      - name: Install build and profiling tools
+      - name: Recover the retained baseline compiler
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 34746063798 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-baseline-compiler --dir build/bin
+          chmod +x build/bin/llc
+          git fetch --no-tags --depth=2 origin c6a554b8b227e4ed876f0a48c7cb12f64b168901
+      - name: Install profiling tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ninja-build clang lld linux-tools-generic
-      - name: Restore compiler cache
-        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03
-        with:
-          key: wide-vector-reduction-ubuntu-24.04
-          max-size: 2G
-      - name: Configure an assertion-enabled compiler with profiling symbols
-        run: |
-          cmake -G Ninja -S llvm -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
-            -DCMAKE_CXX_FLAGS='-gline-tables-only -fno-omit-frame-pointer' \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-            -DLLVM_USE_LINKER=lld \
-            -DLLVM_ENABLE_ASSERTIONS=ON \
-            -DLLVM_TARGETS_TO_BUILD='NVPTX;X86' \
-            -DLLVM_PARALLEL_LINK_JOBS=1 \
-            -DLLVM_INCLUDE_BENCHMARKS=OFF
-      - name: Build focused tools
-        run: ninja -C build -j2 llc opt FileCheck llvm-as llvm-dis
-      - name: Retain the baseline compiler for matched comparisons
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: wide-vector-reduction-baseline-compiler
-          path: build/bin/llc
-          retention-days: 14
+          sudo apt-get install -y linux-tools-generic
       - name: Record source and host
         run: |
           mkdir -p measurements
-          git rev-parse HEAD > measurements/revision.txt
-          git diff 0d55d0bf81ce2e0d6d3c46b7835efb788bde634a -- llvm > measurements/compiler.patch
+          git rev-parse HEAD > measurements/workflow-revision.txt
+          echo c6a554b8b227e4ed876f0a48c7cb12f64b168901 > measurements/compiler-source.txt
+          git diff 0d55d0bf81ce2e0d6d3c46b7835efb788bde634a c6a554b8b227e4ed876f0a48c7cb12f64b168901 -- llvm > measurements/compiler.patch
           uname -a > measurements/kernel.txt
           lscpu > measurements/cpu.txt
-          cp build/CMakeCache.txt measurements/
           sha256sum build/bin/llc > measurements/compiler.sha256
-      - name: Measure reduction and independent controls
+          build/bin/llc --version > measurements/compiler-version.txt
+          python3 .ci/wide-vector-reduction.py --generate-only --output measurements \
+            --widths 1024 4096 16384 65536
+      - name: Capture sample profiles when the runner permits perf
         run: |
           ulimit -c 0
-          ulimit -v 8388608
-          python3 .ci/wide-vector-reduction.py \
-            --compiler baseline build/bin/llc --output measurements \
-            --widths 1024 4096 16384 65536 --repetitions 3 --timeout 180
-      - name: Capture sample profiles when the runner permits perf
-        if: always()
-        run: |
-          if [ ! -x build/bin/llc ] || [ ! -f measurements/inputs/ordered-65536.ll ]; then
-            exit 0
-          fi
           perf_bin=$(find /usr/lib/linux-tools -type f -name perf | sort | tail -1)
           if [ -z "$perf_bin" ]; then
             echo 'No installed perf executable.' > measurements/perf-unavailable.txt
@@ -76,12 +52,27 @@ jobs:
           for kind in ordered no-reduce; do
             timeout --kill-after=5s 180s sudo "$perf_bin" record -e cpu-clock:u -F 99 \
               --call-graph fp -o "measurements/$kind.perf.data" -- \
-              build/bin/llc "measurements/inputs/$kind-65536.ll" -o /dev/null \
+              build/bin/llc "measurements/inputs/$kind-65536.ll" -o /dev/null -time-passes \
               2> "measurements/$kind.perf-status.txt" || continue
             sudo "$perf_bin" report --stdio --no-children \
               -i "measurements/$kind.perf.data" > "measurements/$kind.perf.txt"
+            cat "measurements/$kind.perf-status.txt"
+            head -100 "measurements/$kind.perf.txt"
           done
           sudo chown -R "$(id -u):$(id -g)" measurements
+      - name: Retain profiles before repeated measurements
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wide-vector-reduction-baseline-profiles
+          path: measurements
+          retention-days: 14
+      - name: Measure reduction and independent controls
+        run: |
+          ulimit -c 0
+          ulimit -v 8388608
+          python3 .ci/wide-vector-reduction.py \
+            --compiler baseline build/bin/llc --output measurements \
+            --widths 1024 4096 16384 65536 --repetitions 3 --timeout 180
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
