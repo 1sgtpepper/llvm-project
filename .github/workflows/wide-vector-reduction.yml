@@ -41,7 +41,11 @@ jobs:
             --name wide-vector-reduction-assertions-comparison --dir "$RUNNER_TEMP/previous-comparison"
           mkdir -p measurements/baseline measurements/prior
           cp "$RUNNER_TEMP/previous-comparison/baseline/llc" measurements/baseline/llc
-          cp "$RUNNER_TEMP/previous-comparison/candidate/llc" measurements/prior/llc
+          gh run download 34753452789 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-fast-path-compiler --dir "$RUNNER_TEMP/fast-path-compiler"
+          cp "$RUNNER_TEMP/fast-path-compiler/candidate/llc" measurements/prior/llc
+          python3 .ci/use-node-number-cache-keys.py llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
+          git diff -- llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp > measurements/cache-key.patch
           chmod +x measurements/{baseline,prior}/llc
           git rev-parse HEAD > measurements/revision.txt
           git diff 0d55d0bf81ce2e0d6d3c46b7835efb788bde634a -- llvm > measurements/compiler.patch
@@ -187,19 +191,20 @@ jobs:
         if: always() && steps.build.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: wide-vector-reduction-fast-path-compiler
+          name: wide-vector-reduction-number-key-compiler
           path: |
             measurements/candidate/llc
             measurements/revision.txt
             measurements/compiler.sha256
             measurements/compiler.patch
+            measurements/cache-key.patch
             measurements/CMakeCache.txt
           retention-days: 14
       - name: Retain comparison evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: wide-vector-reduction-fast-path-evidence
+          name: wide-vector-reduction-number-key-evidence
           path: |
             measurements
             !measurements/baseline/llc
