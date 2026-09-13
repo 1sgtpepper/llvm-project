@@ -1,4 +1,4 @@
-name: Check irregular wide-vector boundaries
+name: Inspect wide vector reduction profiles
 
 on:
   push:
@@ -9,60 +9,50 @@ permissions:
   actions: read
 
 jobs:
-  boundaries:
+  profile:
     if: github.repository == '1sgtpepper/llvm-project'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
-        with:
-          persist-credentials: false
-          sparse-checkout: .ci
-      - name: Recover the compared compilers
+      - name: Recover the existing profile and exact baseline compiler
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download 34750720265 --repo 1sgtpepper/llvm-project \
-            --name wide-vector-reduction-assertions-comparison --dir "$RUNNER_TEMP/previous-comparison"
-          chmod +x "$RUNNER_TEMP/previous-comparison/"{baseline,candidate}/llc
           mkdir -p measurements
-          cp "$RUNNER_TEMP/previous-comparison/"{revision.txt,compiler.sha256} measurements/
-      - name: Check the first widening boundary above the operand limit
-        run: |
-          ulimit -c 0
-          ulimit -v 8388608
-          python3 .ci/check-irregular-boundary.py \
-            --baseline "$RUNNER_TEMP/previous-comparison/baseline/llc" \
-            --candidate "$RUNNER_TEMP/previous-comparison/candidate/llc" \
-            --output measurements
-      - name: Install the profiling tool
+          gh run download 34754349165 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-irregular-boundaries --dir measurements/profile
+          gh run download 34746063798 --repo 1sgtpepper/llvm-project \
+            --name wide-vector-reduction-baseline-compiler --dir "$RUNNER_TEMP/compiler-artifact"
+          mkdir -p "$RUNNER_TEMP/previous-comparison/baseline"
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import hashlib
+          import os
+          import shutil
+          root = Path(os.environ["RUNNER_TEMP"])
+          candidates = list((root / "compiler-artifact").rglob("llc"))
+          assert len(candidates) == 1
+          compiler = candidates[0]
+          expected = "71d88d173800d1d1ba6af1a4f387023208c7e37606b559302bba7e301449b586"
+          assert hashlib.sha256(compiler.read_bytes()).hexdigest() == expected
+          shutil.copy2(compiler, root / "previous-comparison/baseline/llc")
+          Path("measurements/compiler.sha256").write_text(expected + "\n")
+          PYTHON
+      - name: Resolve the recorded call chains without recompiling the input
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y linux-tools-generic
-      - name: Bound the packed SM100 timeout with a sampling profile
-        if: always()
-        run: |
           perf_bin=$(find /usr/lib -type f -name perf | sort | tail -1)
-          set +e
-          timeout --kill-after=5s 30s sudo "$perf_bin" record -e cpu-clock:u -F 99 \
-            --call-graph fp -o measurements/sm100.perf.data -- \
-            "$RUNNER_TEMP/previous-comparison/baseline/llc" measurements/ordered-65535.ll \
-            -mcpu=sm_100 -mattr=+ptx88 -o /dev/null -time-passes \
-            2> measurements/sm100.perf-status.txt
-          result=$?
-          set -e
-          echo "$result" > measurements/sm100-profile-exit.txt
-          sudo "$perf_bin" report --stdio --no-children -g none \
-            -i measurements/sm100.perf.data > measurements/sm100.perf.txt
-          sudo chown -R "$(id -u):$(id -g)" measurements
-          test "$result" -eq 0 -o "$result" -eq 124
-      - name: Retain boundary and profile evidence
+          "$perf_bin" report --stdio --children --percent-limit=1.0 \
+            --call-graph graph,1,caller -i measurements/profile/sm100.perf.data \
+            > measurements/sm100-callers.txt 2> measurements/report-status.txt
+      - name: Retain the resolved call chains
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: wide-vector-reduction-irregular-boundaries
-          path: measurements
+          name: wide-vector-reduction-irregular-callers
+          path: |
+            measurements/sm100-callers.txt
+            measurements/report-status.txt
+            measurements/compiler.sha256
           retention-days: 14
