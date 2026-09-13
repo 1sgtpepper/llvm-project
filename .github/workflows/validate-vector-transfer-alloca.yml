@@ -49,12 +49,13 @@ jobs:
             -DLLVM_PARALLEL_LINK_JOBS=1
 
       - name: Build focused MLIR tools
-        run: cmake --build build --parallel 2 --target mlir-opt FileCheck count
+        run: cmake --build build --parallel 2 --target mlir-opt FileCheck count not
 
       - name: Run VectorToSCF tests
         run: |
           test -x build/bin/mlir-opt
           test -x build/bin/FileCheck
           test -x build/bin/count
+          test -x build/bin/not
           test -x build/bin/llvm-lit
           build/bin/llvm-lit -sv mlir/test/Conversion/VectorToSCF
