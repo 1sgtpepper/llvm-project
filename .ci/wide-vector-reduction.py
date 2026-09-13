@@ -53,8 +53,11 @@ def main():
     parser.add_argument("--compiler", nargs=2, action="append", metavar=("LABEL", "LLC"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--widths", type=int, nargs="+", default=[1024, 4096, 16384, 65536])
+    kinds = ["ordered", "reassoc", "no-reduce", "load-reduce", "scalar-chain"]
+    parser.add_argument("--kinds", nargs="+", choices=kinds, default=kinds)
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--llc-arg", action="append", default=[])
     parser.add_argument("--generate-only", action="store_true")
     args = parser.parse_args()
     if any(width < 1 for width in args.widths) or args.repetitions < 1 or args.timeout < 1:
@@ -64,7 +67,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     inputs = args.output / "inputs"
     inputs.mkdir(exist_ok=True)
-    cases = list(itertools.product(args.widths, ["ordered", "reassoc", "no-reduce", "load-reduce", "scalar-chain"]))
+    cases = list(itertools.product(args.widths, args.kinds))
     for width, kind in cases:
         (inputs / f"{kind}-{width}.ll").write_text(module(width, kind))
     if args.generate_only:
@@ -96,7 +99,7 @@ def main():
                 command = [
                     "timeout", "--kill-after=5s", f"{args.timeout}s",
                     "/usr/bin/time", "-f", "%U %S %M", "-o", str(usage),
-                    compilers[label], str(source), "-o", str(assembly),
+                    compilers[label], str(source), *args.llc_arg, "-o", str(assembly),
                 ]
                 start = time.monotonic()
                 with (args.output / f"{name}.stderr").open("w") as stderr:
@@ -118,7 +121,7 @@ def main():
     # Separate region timers from uninstrumented timing measurements.
     with (args.output / "diagnostics.jsonl").open("w") as diagnostics:
         for label, executable in compilers.items():
-            for kind in ("ordered", "reassoc", "no-reduce", "load-reduce", "scalar-chain"):
+            for kind in args.kinds:
                 successful_widths = [
                     width for width in args.widths
                     if (label, width, kind) not in failed_cases
@@ -130,7 +133,7 @@ def main():
                 log = args.output / f"{label}-{kind}-{width}-time-passes.txt"
                 command = [
                     "timeout", "--kill-after=5s", f"{args.timeout}s", executable,
-                    str(source), "-o", "/dev/null", "-time-passes", "-stats",
+                    str(source), *args.llc_arg, "-o", "/dev/null", "-time-passes", "-stats",
                 ]
                 with log.open("w") as stderr:
                     result = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=stderr)
