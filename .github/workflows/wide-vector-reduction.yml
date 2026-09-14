@@ -119,7 +119,7 @@ jobs:
             --compiler baseline measurements/baseline/llc \
             --compiler candidate measurements/candidate/llc --output measurements/timing \
             --widths 65536 \
-            --kinds ordered no-reduce --repetitions 3 --timeout 180
+            --kinds ordered no-reduce --repetitions 10 --timeout 180
       - name: Measure ordinary small functions
         if: always() && steps.build.outcome == 'success'
         run: |
