@@ -6,23 +6,24 @@ import sys
 owner = Path(sys.argv[1])
 source = owner.read_text()
 old = '''unsigned RegReductionPQBase::getClosestSucc(const SUnit *SU) {
-  auto It = ClosestSuccs.find(SU);
-  if (It != ClosestSuccs.end())
-    return It->second;
-  return ClosestSuccs.try_emplace(SU, closestSucc(SU)).first->second;
+  auto [It, Inserted] = ClosestSuccs.try_emplace(SU);
+  if (Inserted)
+    It->second = closestSucc(SU);
+  return It->second;
 }'''
 new = '''STATISTIC(NumSuccessorQueries, "Number of successor queries");
 STATISTIC(NumSuccessorCacheHits, "Number of successor cache hits");
 
 unsigned RegReductionPQBase::getClosestSucc(const SUnit *SU) {
   ++NumSuccessorQueries;
-  auto It = ClosestSuccs.find(SU);
-  if (It != ClosestSuccs.end()) {
+  auto [It, Inserted] = ClosestSuccs.try_emplace(SU);
+  if (Inserted) {
+    It->second = closestSucc(SU);
+  } else {
     ++NumSuccessorCacheHits;
     assert(It->second == closestSucc(SU) && "Stale successor cache value");
-    return It->second;
   }
-  return ClosestSuccs.try_emplace(SU, closestSucc(SU)).first->second;
+  return It->second;
 }'''
 if source.count(old) != 1:
     raise SystemExit('Expected exactly one candidate query definition')
