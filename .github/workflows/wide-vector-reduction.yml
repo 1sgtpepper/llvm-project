@@ -28,7 +28,7 @@ jobs:
       - name: Check out the exact compiler change
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10
         with:
-          ref: 7d1d12716cf580a80394f1f248788cb803bb19e1
+          ref: 0c6f28c9a3248f80309f57d5275d5ab8bb9a9397
           fetch-depth: 6
           persist-credentials: false
       - name: Recover the baseline and record provenance
